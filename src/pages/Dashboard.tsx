@@ -87,47 +87,8 @@ const Dashboard = () => {
         title: "Test created successfully!",
         description: "Your PDF has been processed.",
       });
-      // Add sample questions for demo
-      await addSampleQuestions(data.id);
       fetchTests(user.id);
     }
-  };
-
-  const addSampleQuestions = async (testId: string) => {
-    const sampleQuestions = [
-      {
-        test_id: testId,
-        question_number: 1,
-        question_text: "What is the capital of France?",
-        option_a: "London",
-        option_b: "Paris",
-        option_c: "Berlin",
-        option_d: "Madrid",
-        correct_answer: "B",
-      },
-      {
-        test_id: testId,
-        question_number: 2,
-        question_text: "Which planet is known as the Red Planet?",
-        option_a: "Venus",
-        option_b: "Jupiter",
-        option_c: "Mars",
-        option_d: "Saturn",
-        correct_answer: "C",
-      },
-      {
-        test_id: testId,
-        question_number: 3,
-        question_text: "What is 2 + 2?",
-        option_a: "3",
-        option_b: "4",
-        option_c: "5",
-        option_d: "6",
-        correct_answer: "B",
-      },
-    ];
-
-    await supabase.from("questions").insert(sampleQuestions);
   };
 
   return (
@@ -194,7 +155,25 @@ const Dashboard = () => {
         </div>
 
         <div className="space-y-4">
-          <h2 className="text-2xl font-bold">Your Tests</h2>
+          <div className="flex justify-between items-center">
+            <h2 className="text-2xl font-bold">Your Tests</h2>
+            {tests.length > 0 && (
+              <Button 
+                variant="destructive" 
+                size="sm"
+                onClick={async () => {
+                  if (confirm("Are you sure you want to delete all tests? This cannot be undone.")) {
+                    await supabase.from("tests").delete().eq("user_id", user.id);
+                    await supabase.from("questions").delete().eq("test_id", tests.map(t => t.id));
+                    fetchTests(user.id);
+                    toast({ title: "All tests deleted" });
+                  }
+                }}
+              >
+                Clear All Tests
+              </Button>
+            )}
+          </div>
           {tests.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">

@@ -358,8 +358,7 @@ export default function PdfCropper() {
       
       // Add question data as JSON
       const testData = {
-        title: 'CBT Test',
-        subject: 'Test',
+        title: 'My Questions',
         questions: questions.map(q => ({
           id: q.id,
           questionNumber: q.questionNumber,
