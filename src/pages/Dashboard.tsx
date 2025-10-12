@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { FileUpload } from "@/components/FileUpload";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, GraduationCap, FileText, Clock } from "lucide-react";
+import { LogOut, GraduationCap, FileText, Clock, Scissors } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const Dashboard = () => {
@@ -155,7 +155,43 @@ const Dashboard = () => {
           </p>
         </div>
 
-        <FileUpload onFileSelect={handleFileSelect} />
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Quick Upload
+              </CardTitle>
+              <CardDescription>
+                Upload PDF and auto-generate test questions
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FileUpload onFileSelect={handleFileSelect} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Scissors className="h-5 w-5" />
+                PDF Cropper
+              </CardTitle>
+              <CardDescription>
+                Manually crop questions from PDF for precise control
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                onClick={() => navigate('/pdf-cropper')} 
+                className="w-full"
+                variant="outline"
+              >
+                Open PDF Cropper
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
 
         <div className="space-y-4">
           <h2 className="text-2xl font-bold">Your Tests</h2>
