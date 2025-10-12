@@ -11,7 +11,6 @@ import JSZip from 'jszip'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
-import Tesseract from 'tesseract.js'
 
 // Set up PDF.js worker for react-pdf v7
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js`
@@ -26,25 +25,17 @@ interface CropData {
 
 interface QuestionData {
   id: string
-  subject: string
-  section: string
   questionNumber: number
-  answerOptions: string
-  correctMarks: number
-  incorrectMarks: number
   cropData: CropData
-  imageData?: string
-  extractedText?: string
-  parsedQuestion?: {
-    question: string
-    options: string[]
-  }
+  imageData: string // Base64 image data of the cropped question
+  correctAnswer?: 'A' | 'B' | 'C' | 'D' // For answer key (optional)
 }
 
 export default function PdfCropper() {
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // State
   const [pdfFile, setPdfFile] = useState<File | null>(null)
@@ -58,119 +49,98 @@ export default function PdfCropper() {
   
   // Test mode state
   const [isTestMode, setIsTestMode] = useState(false)
+  const [showResults, setShowResults] = useState(false)
   const [currentTestQuestion, setCurrentTestQuestion] = useState(0)
-  const [testAnswers, setTestAnswers] = useState<{[key: string]: string}>({})
-  const [testSubmitted, setTestSubmitted] = useState(false)
+  const [testAnswers, setTestAnswers] = useState<Record<string, string>>({})
+  const [testStartTime, setTestStartTime] = useState<Date | null>(null)
+  const [testEndTime, setTestEndTime] = useState<Date | null>(null)
   
   // Cropping state
   const [isDragging, setIsDragging] = useState(false)
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [currentCrop, setCurrentCrop] = useState<CropData | null>(null)
+  const [startPoint, setStartPoint] = useState<{ x: number; y: number } | null>(null)
 
-  // Handle file upload
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  // File handling
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (!file || file.type !== 'application/pdf') {
-      toast({
-        title: "Invalid file",
-        description: "Please select a valid PDF file.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsLoading(true)
-    try {
+    if (file && file.type === 'application/pdf') {
       setPdfFile(file)
-      
-      // Create URL for the file
       const url = URL.createObjectURL(file)
       setPdfUrl(url)
+      setCurrentPage(1)
+      setQuestions([])
       
       toast({
-        title: "PDF loaded successfully",
-        description: `Loaded ${file.name}`,
+        title: "PDF loaded",
+        description: "You can now crop questions from the PDF",
       })
-    } catch (error) {
-      console.error('Error loading PDF:', error)
-      toast({
-        title: "Error loading PDF",
-        description: "Failed to load the PDF file. Please try again.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // Handle drag and drop for file upload
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    const files = Array.from(e.dataTransfer.files)
-    const pdfFile = files.find(file => file.type === 'application/pdf')
-    
-    if (pdfFile) {
-      setIsLoading(true)
-      try {
-        setPdfFile(pdfFile)
-        
-        // Create URL for the file
-        const url = URL.createObjectURL(pdfFile)
-        setPdfUrl(url)
-        
-        toast({
-          title: "PDF loaded successfully",
-          description: `Loaded ${pdfFile.name}`,
-        })
-      } catch (error) {
-        console.error('Error loading PDF:', error)
-        toast({
-          title: "Error loading PDF",
-          description: "Failed to load the PDF file. Please try again.",
-          variant: "destructive",
-        })
-      } finally {
-        setIsLoading(false)
-      }
     } else {
       toast({
         title: "Invalid file",
-        description: "Please drop a valid PDF file.",
-        variant: "destructive",
+        description: "Please select a PDF file",
+        variant: "destructive"
       })
     }
-  }, [toast])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-  }, [])
-
-  // Mouse event handlers for cropping
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!pageRef.current) return
-    
-    const rect = pageRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    
-    setDragStart({ x, y })
-    setIsDragging(true)
-    setCurrentCrop({ x, y, width: 0, height: 0, page: currentPage })
   }
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !pageRef.current) return
+  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
+    setTotalPages(numPages)
+    setIsLoading(false)
+  }
+
+  const onDocumentLoadError = (error: Error) => {
+    console.error('PDF load error:', error)
+    setIsLoading(false)
+    toast({
+      title: "PDF Load Error",
+      description: "Failed to load the PDF file",
+      variant: "destructive"
+    })
+  }
+
+  // Get precise coordinates relative to the PDF canvas
+  const getCanvasCoordinates = (event: React.MouseEvent) => {
+    if (!pageRef.current) return { x: 0, y: 0 }
     
-    const rect = pageRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const canvas = pageRef.current.querySelector('canvas')
+    if (!canvas) return { x: 0, y: 0 }
     
-    const width = x - dragStart.x
-    const height = y - dragStart.y
+    const rect = canvas.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    
+    console.log('Mouse coordinates relative to canvas:', { x, y })
+    console.log('Canvas dimensions:', { width: canvas.width, height: canvas.height })
+    console.log('Canvas display size:', { width: rect.width, height: rect.height })
+    
+    return { x, y }
+  }
+
+  // Mouse event handlers for cropping
+  const handleMouseDown = (event: React.MouseEvent) => {
+    event.preventDefault()
+    const coords = getCanvasCoordinates(event)
+    setStartPoint(coords)
+    setIsDragging(true)
+    setCurrentCrop({
+      x: coords.x,
+      y: coords.y,
+      width: 0,
+      height: 0,
+      page: currentPage
+    })
+  }
+
+  const handleMouseMove = (event: React.MouseEvent) => {
+    if (!isDragging || !startPoint) return
+    
+    const coords = getCanvasCoordinates(event)
+    const width = coords.x - startPoint.x
+    const height = coords.y - startPoint.y
     
     setCurrentCrop({
-      x: Math.min(dragStart.x, x),
-      y: Math.min(dragStart.y, y),
+      x: Math.min(startPoint.x, coords.x),
+      y: Math.min(startPoint.y, coords.y),
       width: Math.abs(width),
       height: Math.abs(height),
       page: currentPage
@@ -181,366 +151,83 @@ export default function PdfCropper() {
     setIsDragging(false)
     
     if (currentCrop && currentCrop.width > 10 && currentCrop.height > 10) {
-      // Automatically add the question without requiring metadata
+      // Automatically add the question
       addQuestion()
     } else {
       setCurrentCrop(null)
     }
   }
 
-  // Extract text using Hugging Face TrOCR (much more accurate than Tesseract)
-  const extractWithHuggingFace = async (imageDataUrl: string): Promise<string> => {
-    try {
-      // Convert data URL to blob
-      const response = await fetch(imageDataUrl)
-      const blob = await response.blob()
-      
-      // Use Hugging Face's free TrOCR model
-      const hfResponse = await fetch(
-        "https://api-inference.huggingface.co/models/microsoft/trocr-base-printed",
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-          method: "POST",
-          body: blob,
-        }
-      )
-      
-      if (!hfResponse.ok) {
-        throw new Error(`Hugging Face API error: ${hfResponse.status}`)
-      }
-      
-      const result = await hfResponse.json()
-      console.log('Hugging Face OCR result:', result)
-      
-      if (result && result[0] && result[0].generated_text) {
-        return result[0].generated_text
-      } else {
-        throw new Error('No text detected by Hugging Face OCR')
-      }
-    } catch (error) {
-      console.error('Hugging Face OCR failed:', error)
-      throw error
-    }
-  }
-
-  // Fallback to enhanced Tesseract if Hugging Face fails
-  const extractWithTesseract = async (canvas: HTMLCanvasElement): Promise<string> => {
-    try {
-      // Use the enhanced image preprocessing we already have
-      const preprocessedCanvas = preprocessImage(canvas)
-      const upscaledCanvas = upscaleImage(preprocessedCanvas, 3)
-      
-      const { data: { text, confidence } } = await Tesseract.recognize(upscaledCanvas, 'eng', {
-        logger: m => console.log('Tesseract OCR:', m),
-      })
-      
-      console.log('Tesseract confidence:', confidence)
-      return text
-    } catch (error) {
-      console.error('Tesseract OCR failed:', error)
-      throw error
-    }
-  }
-  const preprocessImage = (canvas: HTMLCanvasElement): HTMLCanvasElement => {
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return canvas
-
-    // Get image data
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    const data = imageData.data
-
-    // Step 1: Convert to grayscale and enhance contrast
-    for (let i = 0; i < data.length; i += 4) {
-      // Convert to grayscale using luminance formula
-      const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2])
-      
-      // Enhance contrast (make darks darker, lights lighter)
-      const enhanced = gray < 128 ? Math.max(0, gray - 30) : Math.min(255, gray + 30)
-      
-      data[i] = enhanced     // Red
-      data[i + 1] = enhanced // Green
-      data[i + 2] = enhanced // Blue
-      // Alpha stays the same
+  // Precise image cropping function
+  const cropImageOnly = async (cropData: CropData): Promise<string> => {
+    if (!pageRef.current) {
+      throw new Error('Page reference not available')
     }
 
-    // Step 2: Apply threshold (binarization) for better text recognition
-    const threshold = 128
-    for (let i = 0; i < data.length; i += 4) {
-      const avg = (data[i] + data[i + 1] + data[i + 2]) / 3
-      const binary = avg > threshold ? 255 : 0
-      
-      data[i] = binary     // Red
-      data[i + 1] = binary // Green
-      data[i + 2] = binary // Blue
+    const canvas = pageRef.current.querySelector('canvas') as HTMLCanvasElement
+    if (!canvas) {
+      throw new Error('Canvas not found')
     }
 
-    // Put the processed image data back
-    ctx.putImageData(imageData, 0, 0)
+    console.log('=== CROPPING DEBUG ===')
+    console.log('Canvas actual size:', canvas.width, 'x', canvas.height)
+    console.log('Canvas display size:', canvas.offsetWidth, 'x', canvas.offsetHeight)
+    console.log('Crop data from UI:', cropData)
     
-    return canvas
-  }
+    // Calculate the scale factor between display and actual canvas
+    const scaleX = canvas.width / canvas.offsetWidth
+    const scaleY = canvas.height / canvas.offsetHeight
+    
+    console.log('Scale factors:', { scaleX, scaleY })
+    
+    // Convert display coordinates to actual canvas coordinates
+    const actualX = cropData.x * scaleX
+    const actualY = cropData.y * scaleY
+    const actualWidth = cropData.width * scaleX
+    const actualHeight = cropData.height * scaleY
+    
+    console.log('Actual crop coordinates:', { actualX, actualY, actualWidth, actualHeight })
 
-  // Upscale image for better OCR
-  const upscaleImage = (canvas: HTMLCanvasElement, scaleFactor: number = 3): HTMLCanvasElement => {
-    const upscaledCanvas = document.createElement('canvas')
-    const upscaledCtx = upscaledCanvas.getContext('2d')
-    if (!upscaledCtx) return canvas
-
-    // Set new dimensions
-    upscaledCanvas.width = canvas.width * scaleFactor
-    upscaledCanvas.height = canvas.height * scaleFactor
-
-    // Disable image smoothing for crisp text
-    upscaledCtx.imageSmoothingEnabled = false
-
-    // Draw upscaled image
-    upscaledCtx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, upscaledCanvas.width, upscaledCanvas.height)
-
-    return upscaledCanvas
-  }
-
-  // Extract text from cropped area using OCR
-  const extractTextFromCrop = async (cropData: CropData): Promise<{question: string, options: string[], croppedImageData: string}> => {
-    try {
-      if (!pageRef.current) {
-        throw new Error('Page reference not available')
-      }
-
-      // Get the canvas element from the PDF page
-      const canvas = pageRef.current.querySelector('canvas')
-      if (!canvas) {
-        throw new Error('Canvas not found')
-      }
-
-      console.log('Canvas found:', canvas.width, 'x', canvas.height)
-      console.log('Crop data:', cropData)
-
-      // Create a new canvas for the cropped area
-      const croppedCanvas = document.createElement('canvas')
-      const ctx = croppedCanvas.getContext('2d')
-      if (!ctx) {
-        throw new Error('Could not get canvas context')
-      }
-
-      // Adjust crop coordinates for the current scale
-      const actualX = cropData.x / scale
-      const actualY = cropData.y / scale
-      const actualWidth = cropData.width / scale
-      const actualHeight = cropData.height / scale
-
-      // Set canvas dimensions to match the crop area
-      croppedCanvas.width = actualWidth
-      croppedCanvas.height = actualHeight
-
-      // Draw the cropped portion onto the new canvas
-      ctx.drawImage(
-        canvas,
-        actualX, actualY, actualWidth, actualHeight,
-        0, 0, actualWidth, actualHeight
-      )
-
-      console.log('Original cropped canvas created:', croppedCanvas.width, 'x', croppedCanvas.height)
-
-      // Step 1: Preprocess the image for better OCR
-      const preprocessedCanvas = preprocessImage(croppedCanvas)
-      console.log('Image preprocessed: contrast enhanced, converted to binary')
-
-      // Step 2: Upscale for better OCR accuracy
-      const upscaledCanvas = upscaleImage(preprocessedCanvas, 3)
-      console.log('Image upscaled:', upscaledCanvas.width, 'x', upscaledCanvas.height)
-
-      // Convert final canvas to data URL for debugging
-      const dataURL = upscaledCanvas.toDataURL()
-      console.log('Final processed image data URL length:', dataURL.length)
-
-      // Store the cropped image for debugging (use original for display)
-      const originalDataURL = croppedCanvas.toDataURL()
-      const tempLink = document.createElement('a')
-      tempLink.href = originalDataURL
-      tempLink.download = `question_${Date.now()}.png`
-      console.log('Original cropped image available for download:', tempLink.download)
-
-      // Try Hugging Face TrOCR first (most accurate), then fallback to Tesseract
-      console.log('Starting OCR with Hugging Face TrOCR...')
-      let text = ''
-      let confidence = 0
-      
-      try {
-        // Convert canvas to blob for Hugging Face API
-        const blob = await new Promise<Blob>((resolve) => {
-          upscaledCanvas.toBlob((blob) => resolve(blob!), 'image/png')
-        })
-        
-        const hfResponse = await fetch(
-          "https://api-inference.huggingface.co/models/microsoft/trocr-large-printed",
-          {
-            headers: { "Content-Type": "application/octet-stream" },
-            method: "POST",
-            body: blob,
-          }
-        )
-        
-        if (hfResponse.ok) {
-          const result = await hfResponse.json()
-          if (result && result[0] && result[0].generated_text) {
-            text = result[0].generated_text
-            confidence = 95 // HF is very accurate
-            console.log('✅ Hugging Face OCR successful:', text)
-          } else {
-            throw new Error('No text in HF response')
-          }
-        } else {
-          throw new Error(`HF API error: ${hfResponse.status}`)
-        }
-      } catch (hfError) {
-        console.warn('⚠️ Hugging Face failed, falling back to Tesseract:', hfError)
-        
-        // Fallback to Tesseract with basic config
-        const tesseractResult = await Tesseract.recognize(upscaledCanvas, 'eng', {
-          logger: m => console.log('Tesseract:', m),
-        })
-        
-        text = tesseractResult.data.text
-        confidence = tesseractResult.data.confidence
-        console.log('✅ Tesseract fallback completed')
-      }
-
-      console.log('OCR completed. Confidence:', confidence)
-      console.log('Extracted text:', text)
-
-      // Parse the extracted text to separate question and options
-      const lines = text.split('\n').filter(line => line.trim().length > 2) // Filter out very short lines
-      console.log('Parsed lines:', lines)
-      
-      // Try to identify question and options
-      let question = 'Question text not detected'
-      const options: string[] = []
-      
-      // More flexible option detection
-      const optionPatterns = [
-        /^[A-Da-d][\)\.]?\s*(.+)/, // A) text or A. text
-        /^\([A-Da-d]\)\s*(.+)/, // (A) text
-        /^[A-Da-d]\s+(.+)/, // A text (space separated)
-      ]
-
-      let questionLines: string[] = []
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim()
-        let isOption = false
-        
-        // Check if this line matches any option pattern
-        for (const pattern of optionPatterns) {
-          const match = line.match(pattern)
-          if (match && match[1]) {
-            options.push(match[1].trim())
-            isOption = true
-            console.log('Found option:', match[1].trim())
-            break
-          }
-        }
-        
-        // If not an option and we haven't found options yet, it's part of the question
-        if (!isOption && options.length === 0) {
-          questionLines.push(line)
-        }
-      }
-
-      // Join question lines
-      if (questionLines.length > 0) {
-        question = questionLines.join(' ').trim()
-      }
-
-      console.log('Final question:', question)
-      console.log('Final options:', options)
-
-      // If we still don't have good options, try a different approach
-      if (options.length === 0) {
-        console.log('No options found, trying alternative parsing...')
-        
-        // Look for any lines that might be options (even without clear markers)
-        const potentialOptions = lines.filter(line => {
-          const trimmed = line.trim()
-          return trimmed.length > 1 && trimmed.length < 200 && 
-                 !trimmed.includes('?') && // Probably not part of question
-                 trimmed !== question
-        })
-        
-        if (potentialOptions.length > 0) {
-          options.push(...potentialOptions.slice(0, 4)) // Take up to 4 options
-          console.log('Alternative options found:', options)
-        }
-      }
-
-        // If still no options, create generic ones but with a clear indicator
-        if (options.length === 0) {
-          console.log('No options detected, using fallback')
-          return {
-            question: question || 'Question could not be extracted clearly',
-            options: ['[OCR Failed] Option A', '[OCR Failed] Option B', '[OCR Failed] Option C', '[OCR Failed] Option D'],
-            croppedImageData: originalDataURL
-          }
-        }
-
-        // Ensure we have at least 2 options, pad if necessary
-        while (options.length < 2) {
-          options.push(`[Generated] Option ${String.fromCharCode(65 + options.length)}`)
-        }      return { question, options: options.slice(0, 4), croppedImageData: originalDataURL } // Limit to 4 options
-    } catch (error) {
-      console.error('OCR extraction failed:', error)
-      return {
-        question: 'Error: Could not extract text',
-        options: ['[Error] Option A', '[Error] Option B', '[Error] Option C', '[Error] Option D'],
-        croppedImageData: ''
-      }
+    // Create a new canvas for the cropped area
+    const croppedCanvas = document.createElement('canvas')
+    const ctx = croppedCanvas.getContext('2d')
+    if (!ctx) {
+      throw new Error('Could not get canvas context')
     }
+
+    // Set dimensions to match the crop area
+    croppedCanvas.width = actualWidth
+    croppedCanvas.height = actualHeight
+
+    // Extract the cropped portion
+    ctx.drawImage(
+      canvas,
+      actualX, actualY, actualWidth, actualHeight,  // Source coordinates
+      0, 0, actualWidth, actualHeight               // Destination coordinates
+    )
+
+    // Convert to high-quality data URL
+    const imageData = croppedCanvas.toDataURL('image/png', 1.0)
+    console.log('✅ Cropped image created, size:', imageData.length, 'bytes')
+    console.log('Cropped canvas size:', croppedCanvas.width, 'x', croppedCanvas.height)
+    
+    return imageData
   }
 
-  // Add question with current crop and OCR
+  // Add question with cropped image
   const addQuestion = async () => {
     if (!currentCrop) return
 
     setIsProcessingOCR(true)
     
     try {
-      // Extract text from the cropped area
-      const { question, options, croppedImageData } = await extractTextFromCrop(currentCrop)
+      const croppedImageData = await cropImageOnly(currentCrop)
 
       const newQuestion: QuestionData = {
         id: `q_${Date.now()}`,
-        subject: 'Question',
-        section: 'Section',
         questionNumber: questions.length + 1,
-        answerOptions: '4',
-        correctMarks: 1,
-        incorrectMarks: 0,
         cropData: currentCrop,
-        parsedQuestion: { question, options },
-        imageData: croppedImageData // Store the cropped image
-      }
-
-      setQuestions([...questions, newQuestion])
-      setCurrentCrop(null)
-
-      toast({
-        title: "Question added with OCR",
-        description: `Added Question ${newQuestion.questionNumber} - Text extracted successfully`,
-      })
-    } catch (error) {
-      console.error('Failed to add question with OCR:', error)
-      
-      // Fallback: add question without OCR
-      const newQuestion: QuestionData = {
-        id: `q_${Date.now()}`,
-        subject: 'Question',
-        section: 'Section',
-        questionNumber: questions.length + 1,
-        answerOptions: '4',
-        correctMarks: 1,
-        incorrectMarks: 0,
-        cropData: currentCrop
+        imageData: croppedImageData
       }
 
       setQuestions([...questions, newQuestion])
@@ -548,7 +235,17 @@ export default function PdfCropper() {
 
       toast({
         title: "Question added",
-        description: `Added Question ${newQuestion.questionNumber} - OCR failed, using fallback`,
+        description: `Added Question ${newQuestion.questionNumber} - Image saved successfully`,
+      })
+      
+      console.log('✅ Question added:', newQuestion.id, 'Image size:', croppedImageData.length)
+      
+    } catch (error) {
+      console.error('❌ Failed to add question:', error)
+      
+      toast({
+        title: "Error",
+        description: "Failed to crop question image. Please try again.",
         variant: "destructive"
       })
     } finally {
@@ -556,22 +253,102 @@ export default function PdfCropper() {
     }
   }
 
+  // Navigation functions
+  const goToPreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1)
+      setCurrentCrop(null)
+    }
+  }
+
+  const goToNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1)
+      setCurrentCrop(null)
+    }
+  }
+
+  const adjustScale = (delta: number) => {
+    setScale(Math.max(0.5, Math.min(3.0, scale + delta)))
+  }
+
   // Remove question
   const removeQuestion = (id: string) => {
     setQuestions(questions.filter(q => q.id !== id))
     toast({
       title: "Question removed",
-      description: "Question has been removed from the list",
+      description: "Question has been deleted",
     })
   }
 
-  // Export CBT
-  const exportCBT = async () => {
+  // Test mode functions
+  const startTest = () => {
     if (questions.length === 0) {
       toast({
         title: "No questions",
-        description: "Please add some questions before exporting.",
-        variant: "destructive",
+        description: "Please add some questions before starting the test",
+        variant: "destructive"
+      })
+      return
+    }
+    
+    setIsTestMode(true)
+    setShowResults(false)
+    setCurrentTestQuestion(0)
+    setTestAnswers({})
+    setTestStartTime(new Date())
+    setTestEndTime(null)
+  }
+
+  const handleAnswerSelect = (questionId: string, answer: string) => {
+    setTestAnswers(prev => ({
+      ...prev,
+      [questionId]: answer
+    }))
+  }
+
+  const nextQuestion = () => {
+    if (currentTestQuestion < questions.length - 1) {
+      setCurrentTestQuestion(currentTestQuestion + 1)
+    }
+  }
+
+  const previousQuestion = () => {
+    if (currentTestQuestion > 0) {
+      setCurrentTestQuestion(currentTestQuestion - 1)
+    }
+  }
+
+  const finishTest = () => {
+    setTestEndTime(new Date())
+    setIsTestMode(false)
+    setShowResults(true)
+    
+    toast({
+      title: "Test completed",
+      description: `You answered ${Object.keys(testAnswers).length} out of ${questions.length} questions`,
+    })
+  }
+
+  const backToMain = () => {
+    setShowResults(false)
+    setIsTestMode(false)
+    setTestAnswers({})
+    setCurrentTestQuestion(0)
+  }
+
+  const retakeTest = () => {
+    setShowResults(false)
+    startTest()
+  }
+
+  // Export functions
+  const exportAsZip = async () => {
+    if (questions.length === 0) {
+      toast({
+        title: "No questions to export",
+        description: "Please add some questions first",
+        variant: "destructive"
       })
       return
     }
@@ -585,395 +362,351 @@ export default function PdfCropper() {
         subject: 'Test',
         questions: questions.map(q => ({
           id: q.id,
-          section: q.section,
           questionNumber: q.questionNumber,
-          answerOptions: parseInt(q.answerOptions),
-          correctMarks: q.correctMarks,
-          incorrectMarks: q.incorrectMarks,
-          cropData: q.cropData
+          imageData: q.imageData,
+          cropData: q.cropData,
+          correctAnswer: q.correctAnswer || null
         }))
       }
       
       zip.file('test_data.json', JSON.stringify(testData, null, 2))
       
-      // Generate zip file
-      const zipBlob = await zip.generateAsync({ type: 'blob' })
-      const fileName = `cbt_test_${new Date().toISOString().split('T')[0]}.zip`
+      // Add individual question images
+      questions.forEach((question, index) => {
+        if (question.imageData) {
+          // Convert base64 to binary
+          const base64Data = question.imageData.split(',')[1]
+          zip.file(`question_${index + 1}.png`, base64Data, { base64: true })
+        }
+      })
       
-      saveAs(zipBlob, fileName)
+      // Generate and download the zip file
+      const content = await zip.generateAsync({ type: 'blob' })
+      saveAs(content, 'cbt_questions.zip')
       
       toast({
         title: "Export successful",
-        description: `Exported ${questions.length} questions to ${fileName}`,
+        description: `Exported ${questions.length} questions as ZIP file`,
       })
     } catch (error) {
-      console.error('Export error:', error)
+      console.error('Export failed:', error)
       toast({
         title: "Export failed",
-        description: "Failed to export CBT. Please try again.",
-        variant: "destructive",
+        description: "Failed to create ZIP file",
+        variant: "destructive"
       })
     }
   }
 
-  // Start test mode
-  const startTest = () => {
-    if (questions.length === 0) {
-      toast({
-        title: "No questions",
-        description: "Please add some questions before starting the test.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsTestMode(true)
-    setCurrentTestQuestion(0)
-    setTestAnswers({})
-    setTestSubmitted(false)
-    
-    toast({
-      title: "Test started",
-      description: `Starting test with ${questions.length} questions`,
-    })
+  // Helper function to calculate test duration
+  const getTestDuration = () => {
+    if (!testStartTime || !testEndTime) return 'Unknown'
+    const diffMs = testEndTime.getTime() - testStartTime.getTime()
+    const minutes = Math.floor(diffMs / 60000)
+    const seconds = Math.floor((diffMs % 60000) / 1000)
+    return `${minutes}m ${seconds}s`
   }
 
-  // Handle test answer selection
-  const handleAnswerSelect = (questionId: string, answer: string) => {
-    setTestAnswers(prev => ({
-      ...prev,
-      [questionId]: answer
-    }))
-  }
+  // Results page
+  if (showResults) {
+    const totalQuestions = questions.length
+    const answeredCount = Object.keys(testAnswers).length
+    const unansweredCount = totalQuestions - answeredCount
 
-  // Submit test
-  const submitTest = () => {
-    setTestSubmitted(true)
-    const answeredQuestions = Object.keys(testAnswers).length
-    
-    toast({
-      title: "Test submitted",
-      description: `Answered ${answeredQuestions} out of ${questions.length} questions`,
-    })
-  }
-
-  // Go back to cropping mode
-  const exitTestMode = () => {
-    setIsTestMode(false)
-    setCurrentTestQuestion(0)
-    setTestAnswers({})
-    setTestSubmitted(false)
-  }
-
-  // PDF document load success
-  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-    setTotalPages(numPages)
-    setCurrentPage(1)
-    setIsLoading(false)
-  }
-
-  // PDF document load error
-  const onDocumentLoadError = (error: Error) => {
-    console.error('PDF load error:', error)
-    setIsLoading(false)
-    toast({
-      title: "Error loading PDF",
-      description: "Failed to load the PDF file. Please try a different file.",
-      variant: "destructive",
-    })
-  }
-
-  return (
-    <div className="container mx-auto py-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">
-            {isTestMode ? "CBT Test" : "PDF Cropper"}
-          </h1>
-          <p className="text-muted-foreground">
-            {isTestMode 
-              ? `Question ${currentTestQuestion + 1} of ${questions.length}` 
-              : "Extract questions from PDF documents"
-            }
-          </p>
-        </div>
-        {isTestMode && (
-          <Button onClick={exitTestMode} variant="outline">
-            Back to Cropping
-          </Button>
-        )}
-      </div>
-
-      {isTestMode ? (
-        // Test Mode Interface
-        <div className="space-y-6">
-          {!testSubmitted ? (
-            // Active Test
-            <Card>
-              <CardHeader>
-                <CardTitle>Question {currentTestQuestion + 1}</CardTitle>
-                <CardDescription>
-                  Select your answer and click Next to continue
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Question Text and Debug Info */}
-                {questions[currentTestQuestion]?.parsedQuestion && (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-blue-50 rounded-lg border">
-                      <h3 className="font-medium text-blue-900 mb-2">Question:</h3>
-                      <p className="text-blue-800">{questions[currentTestQuestion].parsedQuestion.question}</p>
-                    </div>
-                    
-                    {/* Debug: Show if OCR found real options */}
-                    {questions[currentTestQuestion].parsedQuestion.options.some(opt => !opt.includes('[') && !opt.startsWith('Option')) && (
-                      <div className="p-2 bg-green-50 rounded border text-sm text-green-700">
-                        ✓ OCR successfully extracted options from PDF
-                      </div>
-                    )}
-                    
-                    {questions[currentTestQuestion].parsedQuestion.options.some(opt => opt.includes('[')) && (
-                      <div className="p-2 bg-red-50 rounded border text-sm text-red-700">
-                        ⚠ OCR could not extract options clearly - check console for details
-                        {questions[currentTestQuestion].imageData && (
-                          <div className="mt-2">
-                            <p className="text-xs mb-1">Cropped image sent to OCR:</p>
-                            <img 
-                              src={questions[currentTestQuestion].imageData} 
-                              alt="Cropped question area" 
-                              className="border rounded max-w-full h-auto max-h-32"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Question Image */}
-                <div className="border rounded-lg overflow-hidden bg-gray-50 min-h-[300px] relative">
-                  {pdfFile && pdfUrl && (
-                    <Document
-                      file={pdfUrl}
-                      onLoadSuccess={onDocumentLoadSuccess}
-                      onLoadError={onDocumentLoadError}
-                      loading={<div>Loading PDF...</div>}
-                    >
-                      <div className="relative">
-                        <Page
-                          pageNumber={questions[currentTestQuestion]?.cropData.page || 1}
-                          scale={scale * 0.8}
-                          renderTextLayer={false}
-                          renderAnnotationLayer={false}
-                        />
-                        
-                        {/* Highlight the current question area */}
-                        {questions[currentTestQuestion] && (
-                          <div
-                            className="absolute border-4 border-red-500 bg-red-200 bg-opacity-10 pointer-events-none"
-                            style={{
-                              left: questions[currentTestQuestion].cropData.x * 0.8,
-                              top: questions[currentTestQuestion].cropData.y * 0.8,
-                              width: questions[currentTestQuestion].cropData.width * 0.8,
-                              height: questions[currentTestQuestion].cropData.height * 0.8,
-                            }}
-                          />
-                        )}
-                      </div>
-                    </Document>
-                  )}
-                </div>
-
-                {/* Answer Options */}
-                <div className="space-y-3">
-                  <Label className="text-base font-medium">Select your answer:</Label>
-                  <div className="grid gap-2">
-                    {questions[currentTestQuestion]?.parsedQuestion?.options ? (
-                      // Use extracted options from OCR
-                      questions[currentTestQuestion].parsedQuestion.options.map((option, index) => {
-                        const optionLetter = String.fromCharCode(65 + index) // A, B, C, D
-                        return (
-                          <Button
-                            key={optionLetter}
-                            variant={testAnswers[questions[currentTestQuestion]?.id] === optionLetter ? "default" : "outline"}
-                            className="justify-start h-auto min-h-12 text-left p-4"
-                            onClick={() => handleAnswerSelect(questions[currentTestQuestion]?.id, optionLetter)}
-                          >
-                            <span className="w-8 h-8 rounded-full border-2 border-current flex items-center justify-center mr-3 text-sm font-bold flex-shrink-0">
-                              {optionLetter}
-                            </span>
-                            <span className="text-sm">{option}</span>
-                          </Button>
-                        )
-                      })
-                    ) : (
-                      // Fallback to generic options
-                      ['A', 'B', 'C', 'D'].slice(0, parseInt(questions[currentTestQuestion]?.answerOptions || '4')).map((option) => (
-                        <Button
-                          key={option}
-                          variant={testAnswers[questions[currentTestQuestion]?.id] === option ? "default" : "outline"}
-                          className="justify-start h-12 text-left"
-                          onClick={() => handleAnswerSelect(questions[currentTestQuestion]?.id, option)}
-                        >
-                          <span className="w-8 h-8 rounded-full border-2 border-current flex items-center justify-center mr-3 text-sm font-bold">
-                            {option}
-                          </span>
-                          Option {option}
-                        </Button>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Navigation */}
-                <div className="flex justify-between items-center">
-                  <Button
-                    variant="outline"
-                    onClick={() => setCurrentTestQuestion(Math.max(0, currentTestQuestion - 1))}
-                    disabled={currentTestQuestion === 0}
-                  >
-                    Previous
-                  </Button>
-                  
-                  <span className="text-sm text-gray-600">
-                    {Object.keys(testAnswers).length} of {questions.length} answered
-                  </span>
-                  
-                  {currentTestQuestion < questions.length - 1 ? (
-                    <Button
-                      onClick={() => setCurrentTestQuestion(currentTestQuestion + 1)}
-                    >
-                      Next
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={submitTest}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      Submit Test
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            // Test Results
-            <Card>
-              <CardHeader>
-                <CardTitle>Test Completed!</CardTitle>
-                <CardDescription>
-                  Here are your results
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="text-center p-4 border rounded-lg">
-                    <div className="text-2xl font-bold text-blue-600">{questions.length}</div>
-                    <div className="text-sm text-gray-600">Total Questions</div>
-                  </div>
-                  <div className="text-center p-4 border rounded-lg">
-                    <div className="text-2xl font-bold text-green-600">{Object.keys(testAnswers).length}</div>
-                    <div className="text-sm text-gray-600">Answered</div>
-                  </div>
-                  <div className="text-center p-4 border rounded-lg">
-                    <div className="text-2xl font-bold text-orange-600">{questions.length - Object.keys(testAnswers).length}</div>
-                    <div className="text-sm text-gray-600">Unanswered</div>
-                  </div>
-                </div>
-
-                {/* Answer Summary */}
-                <div className="space-y-2">
-                  <h4 className="font-medium">Your Answers:</h4>
-                  <div className="grid gap-2">
-                    {questions.map((question, index) => (
-                      <div key={question.id} className="flex justify-between items-center p-2 border rounded">
-                        <span>Question {index + 1}</span>
-                        <span className={`font-bold ${testAnswers[question.id] ? 'text-green-600' : 'text-red-600'}`}>
-                          {testAnswers[question.id] || 'Not Answered'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button onClick={() => setTestSubmitted(false)}>
-                    Retake Test
-                  </Button>
-                  <Button onClick={exitTestMode} variant="outline">
-                    Back to Cropping
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      ) : (
-        // Cropping Mode Interface (existing code)
-        <div className="grid gap-6 lg:grid-cols-1">
-        {/* PDF Viewer */}
+    return (
+      <div className="container mx-auto p-6 max-w-6xl">
         <Card>
           <CardHeader>
-            <CardTitle>PDF Cropper</CardTitle>
-            <CardDescription>
-              Upload a PDF and click & drag to select question areas. Questions will be added automatically.
-            </CardDescription>
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle className="text-2xl">📊 Test Results</CardTitle>
+                <CardDescription>
+                  Review your answers and performance
+                </CardDescription>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={retakeTest}>
+                  🔄 Retake Test
+                </Button>
+                <Button onClick={backToMain}>
+                  🏠 Back to Main
+                </Button>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* File Upload */}
-            <div className="space-y-2">
-              <Label>PDF File</Label>
-              <div 
-                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-gray-400 transition-colors"
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                <p className="text-sm text-gray-600">
-                  {pdfFile ? pdfFile.name : 'Click or drag PDF file here'}
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
+          <CardContent className="space-y-6">
+            {/* Test Summary */}
+            <div className="grid md:grid-cols-4 gap-4">
+              <Card className="p-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-blue-600">{totalQuestions}</div>
+                  <div className="text-sm text-gray-600">Total Questions</div>
+                </div>
+              </Card>
+              <Card className="p-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-600">{answeredCount}</div>
+                  <div className="text-sm text-gray-600">Answered</div>
+                </div>
+              </Card>
+              <Card className="p-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-red-600">{unansweredCount}</div>
+                  <div className="text-sm text-gray-600">Unanswered</div>
+                </div>
+              </Card>
+              <Card className="p-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-purple-600">{getTestDuration()}</div>
+                  <div className="text-sm text-gray-600">Duration</div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Question by Question Results */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">📝 Question by Question Review</h3>
+              <div className="grid gap-4">
+                {questions.map((question, index) => {
+                  const userAnswer = testAnswers[question.id]
+                  const isAnswered = !!userAnswer
+                  
+                  return (
+                    <Card key={question.id} className="p-4 border-gray-200 bg-white">
+                      <div className="grid md:grid-cols-3 gap-4 items-center">
+                        {/* Question Image */}
+                        <div className="space-y-2">
+                          <div className="font-medium">Question {question.questionNumber}</div>
+                          {question.imageData && (
+                            <div className="border rounded overflow-hidden bg-white">
+                              <img 
+                                src={question.imageData} 
+                                alt={`Question ${question.questionNumber}`}
+                                className="w-full h-32 object-contain"
+                              />
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Answer Status */}
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Your Answer:</div>
+                          {isAnswered ? (
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 border-2 border-blue-500 text-blue-700 font-bold">
+                                {userAnswer}
+                              </span>
+                              <span className="text-green-600 font-medium">Option {userAnswer}</span>
+                            </div>
+                          ) : (
+                            <div className="text-red-600 font-medium">❌ Not Answered</div>
+                          )}
+                        </div>
+                        
+                        {/* Status Badge */}
+                        <div className="text-right">
+                          {isAnswered ? (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                              ✅ Answered
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                              ❌ Skipped
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  )
+                })}
               </div>
             </div>
 
-            {/* Export Button */}
-            {questions.length > 0 && (
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">
-                  {questions.length} question{questions.length !== 1 ? 's' : ''} selected
-                </span>
-                <div className="flex gap-2">
-                  <Button onClick={startTest} variant="default">
-                    Take Test ({questions.length})
-                  </Button>
-                  <Button onClick={exportCBT} variant="outline">
-                    <Download className="h-4 w-4 mr-2" />
-                    Export CBT
-                  </Button>
-                </div>
-              </div>
-            )}
+            {/* Action Buttons */}
+            <div className="flex justify-center gap-4 pt-6 border-t">
+              <Button onClick={retakeTest} className="bg-blue-600 hover:bg-blue-700">
+                🔄 Take Test Again
+              </Button>
+              <Button variant="outline" onClick={backToMain}>
+                🏠 Back to Question Editor
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
-            {/* PDF Viewer Area */}
-            <div className="border rounded-lg overflow-hidden bg-gray-50 min-h-[600px] relative">
-              {pdfFile && pdfUrl ? (
-                <div className="relative w-full h-full">
-                  {(isLoading || isProcessingOCR) && (
-                    <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-50">
-                      <div className="text-center">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-                        <p>{isProcessingOCR ? 'Extracting text with OCR...' : 'Loading PDF...'}</p>
-                      </div>
-                    </div>
-                  )}
+  if (isTestMode) {
+    return (
+      <div className="container mx-auto p-6 max-w-4xl">
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle>Question {currentTestQuestion + 1} of {questions.length}</CardTitle>
+                <CardDescription>
+                  Select your answer and click Next to continue
+                </CardDescription>
+              </div>
+              <Button variant="outline" onClick={() => setIsTestMode(false)}>
+                Exit Test
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Question Image */}
+            <div className="border rounded-lg bg-gray-50 w-full h-[85vh] flex items-center justify-center p-2">
+              {questions[currentTestQuestion]?.imageData ? (
+                <img 
+                  src={questions[currentTestQuestion].imageData} 
+                  alt={`Question ${questions[currentTestQuestion].questionNumber}`}
+                  className="max-w-full max-h-full object-contain"
+                  style={{ 
+                    minWidth: '80%',
+                    minHeight: '80%'
+                  }}
+                />
+              ) : (
+                <div className="text-gray-500 text-center">
+                  <p>Question image not available</p>
+                </div>
+              )}
+            </div>
+
+            {/* Answer Options */}
+            <div className="space-y-3">
+              <Label className="text-base font-medium">Select your answer:</Label>
+              <div className="grid gap-2">
+                {['A', 'B', 'C', 'D'].map((option) => (
+                  <Button
+                    key={option}
+                    variant={testAnswers[questions[currentTestQuestion]?.id] === option ? "default" : "outline"}
+                    className="justify-start h-12 text-left"
+                    onClick={() => handleAnswerSelect(questions[currentTestQuestion]?.id, option)}
+                  >
+                    <span className="w-8 h-8 rounded-full border-2 border-current flex items-center justify-center mr-3 text-sm font-bold">
+                      {option}
+                    </span>
+                    Option {option}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Navigation */}
+            <div className="flex justify-between items-center">
+              <Button
+                variant="outline"
+                onClick={previousQuestion}
+                disabled={currentTestQuestion === 0}
+              >
+                <ChevronLeft className="h-4 w-4 mr-2" />
+                Previous
+              </Button>
+              
+              <span className="text-sm text-gray-500">
+                Question {currentTestQuestion + 1} of {questions.length}
+              </span>
+              
+              {currentTestQuestion < questions.length - 1 ? (
+                <Button onClick={nextQuestion}>
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-2" />
+                </Button>
+              ) : (
+                <Button onClick={finishTest} className="bg-green-600 hover:bg-green-700">
+                  Finish Test
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="text-center">
+        <h1 className="text-3xl font-bold mb-2">PDF to CBT Converter</h1>
+        <p className="text-gray-600">Upload a PDF and crop question areas to create CBT tests</p>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-6">
+        {/* Left Panel - PDF Viewer */}
+        <div className="md:col-span-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                PDF Viewer & Cropper
+              </CardTitle>
+              <CardDescription>
+                Upload a PDF and draw rectangles around questions to crop them
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* File Upload */}
+              <div className="space-y-2">
+                <Label htmlFor="pdf-upload">Upload PDF File</Label>
+                <Input
+                  id="pdf-upload"
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFileSelect}
+                  ref={fileInputRef}
+                />
+              </div>
+
+              {/* PDF Controls */}
+              {pdfFile && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={goToPreviousPage}
+                      disabled={currentPage <= 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={goToNextPage}
+                      disabled={currentPage >= totalPages}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
                   
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => adjustScale(-0.2)}
+                    >
+                      <ZoomOut className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm">{Math.round(scale * 100)}%</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => adjustScale(0.2)}
+                    >
+                      <ZoomIn className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* PDF Display Area */}
+              <div className="border rounded-lg overflow-hidden bg-gray-50 min-h-[600px] relative">
+                {pdfFile && pdfUrl ? (
                   <Document
                     file={pdfUrl}
                     onLoadSuccess={onDocumentLoadSuccess}
@@ -981,11 +714,11 @@ export default function PdfCropper() {
                     loading={<div>Loading PDF...</div>}
                   >
                     <div 
-                      ref={pageRef}
                       className="relative cursor-crosshair"
                       onMouseDown={handleMouseDown}
                       onMouseMove={handleMouseMove}
                       onMouseUp={handleMouseUp}
+                      ref={pageRef}
                     >
                       <Page
                         pageNumber={currentPage}
@@ -994,10 +727,10 @@ export default function PdfCropper() {
                         renderAnnotationLayer={false}
                       />
                       
-                      {/* Current crop selection */}
+                      {/* Current crop overlay */}
                       {currentCrop && (
                         <div
-                          className="absolute border-2 border-blue-500 bg-blue-200 bg-opacity-20 pointer-events-none"
+                          className="absolute border-2 border-red-500 bg-red-200 bg-opacity-20 pointer-events-none"
                           style={{
                             left: currentCrop.x,
                             top: currentCrop.y,
@@ -1006,14 +739,14 @@ export default function PdfCropper() {
                           }}
                         />
                       )}
-
-                      {/* Existing question overlays */}
+                      
+                      {/* Show existing question crops */}
                       {questions
                         .filter(q => q.cropData.page === currentPage)
-                        .map((question) => (
+                        .map((question, index) => (
                           <div
                             key={question.id}
-                            className="absolute border-2 border-green-500 bg-green-200 bg-opacity-20 pointer-events-none"
+                            className="absolute border-2 border-green-500 bg-green-200 bg-opacity-10 pointer-events-none"
                             style={{
                               left: question.cropData.x,
                               top: question.cropData.y,
@@ -1021,80 +754,42 @@ export default function PdfCropper() {
                               height: question.cropData.height,
                             }}
                           >
-                            <div className="absolute -top-6 left-0 bg-green-500 text-white text-xs px-1 rounded">
+                            <span className="absolute -top-6 left-0 bg-green-500 text-white text-xs px-1 rounded">
                               Q{question.questionNumber}
-                            </div>
+                            </span>
                           </div>
                         ))}
                     </div>
                   </Document>
-                  
-                  {/* Controls */}
-                  <div className="absolute bottom-4 left-4 flex items-center space-x-2 bg-white rounded-lg shadow-lg p-2">
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                      disabled={currentPage <= 1}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    
-                    <span className="text-sm px-2">
-                      {currentPage} / {totalPages}
-                    </span>
-                    
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                      disabled={currentPage >= totalPages}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                    
-                    <div className="border-l pl-2 ml-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={() => setScale(Math.max(0.5, scale - 0.1))}
-                      >
-                        <ZoomOut className="h-4 w-4" />
-                      </Button>
-                      
-                      <span className="text-sm px-2">
-                        {Math.round(scale * 100)}%
-                      </span>
-                      
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={() => setScale(Math.min(2.0, scale + 0.1))}
-                      >
-                        <ZoomIn className="h-4 w-4" />
-                      </Button>
+                ) : (
+                  <div className="flex items-center justify-center h-[400px] text-gray-500">
+                    <div className="text-center">
+                      <Upload className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Upload a PDF file to get started</p>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-500">
-                  <div className="text-center">
-                    <FileText className="h-16 w-16 mx-auto mb-4" />
-                    <p>No PDF loaded</p>
-                    <p className="text-sm">Upload a PDF file to get started</p>
+                )}
+                
+                {isProcessingOCR && (
+                  <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                    <div className="bg-white p-4 rounded-lg">
+                      <p>Processing question...</p>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-        
-        {/* Questions List */}
-        {questions.length > 0 && (
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right Panel - Questions List */}
+        <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Questions ({questions.length})</CardTitle>
-              <CardDescription>Manage your extracted questions</CardDescription>
+              <CardTitle>Extracted Questions ({questions.length})</CardTitle>
+              <CardDescription>
+                Questions cropped from the PDF
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
@@ -1103,7 +798,7 @@ export default function PdfCropper() {
                     <div>
                       <span className="font-medium">Q{question.questionNumber}</span>
                       <span className="text-sm text-gray-500 ml-2">
-                        {question.answerOptions} options • Page {question.cropData.page}
+                        4 options • Page {question.cropData.page}
                       </span>
                     </div>
                     <Button
@@ -1115,12 +810,43 @@ export default function PdfCropper() {
                     </Button>
                   </div>
                 ))}
+                
+                {questions.length === 0 && (
+                  <p className="text-gray-500 text-center py-4">
+                    No questions added yet. Draw rectangles on the PDF to crop questions.
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
-        )}
+
+          {/* Actions */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Button
+                onClick={startTest}
+                className="w-full"
+                disabled={questions.length === 0}
+              >
+                Start Test Preview
+              </Button>
+              
+              <Button
+                variant="outline"
+                onClick={exportAsZip}
+                className="w-full"
+                disabled={questions.length === 0}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export as ZIP
+              </Button>
+            </CardContent>
+          </Card>
         </div>
-      )}
+      </div>
     </div>
   )
 }
