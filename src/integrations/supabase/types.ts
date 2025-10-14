@@ -37,36 +37,39 @@ export type Database = {
           correct_answer: string
           created_at: string
           id: string
-          option_a: string
-          option_b: string
-          option_c: string
-          option_d: string
+          image_data: string | null
+          option_a: string | null
+          option_b: string | null
+          option_c: string | null
+          option_d: string | null
           question_number: number
-          question_text: string
+          question_text: string | null
           test_id: string
         }
         Insert: {
           correct_answer: string
           created_at?: string
           id?: string
-          option_a: string
-          option_b: string
-          option_c: string
-          option_d: string
+          image_data?: string | null
+          option_a?: string | null
+          option_b?: string | null
+          option_c?: string | null
+          option_d?: string | null
           question_number: number
-          question_text: string
+          question_text?: string | null
           test_id: string
         }
         Update: {
           correct_answer?: string
           created_at?: string
           id?: string
-          option_a?: string
-          option_b?: string
-          option_c?: string
-          option_d?: string
+          image_data?: string | null
+          option_a?: string | null
+          option_b?: string | null
+          option_c?: string | null
+          option_d?: string | null
           question_number?: number
-          question_text?: string
+          question_text?: string | null
           test_id?: string
         }
         Relationships: [

@@ -30,6 +30,26 @@ const Review = () => {
       .eq("test_id", testId)
       .order("question_number");
 
+    // Parse image data from JSON if it exists
+    const processedQuestions = (questionsData || []).map(question => {
+      try {
+        const questionData = JSON.parse(question.question_text);
+        if (questionData.type === 'image' && questionData.imageData) {
+          return {
+            ...question,
+            imageData: questionData.imageData,
+            isImageBased: true
+          };
+        }
+      } catch (e) {
+        // If JSON parsing fails, treat as regular text question
+      }
+      return {
+        ...question,
+        isImageBased: false
+      };
+    });
+
     // Fetch user answers
     const { data: answersData } = await supabase
       .from("user_answers")
@@ -37,7 +57,7 @@ const Review = () => {
       .eq("test_id", testId)
       .eq("user_id", session.data.session.user.id);
 
-    setQuestions(questionsData || []);
+    setQuestions(processedQuestions);
     setAnswers(answersData || []);
     setLoading(false);
   };
@@ -121,6 +141,7 @@ const Review = () => {
                   onAnswerSelect={() => {}}
                   showCorrect={true}
                   correctAnswer={question.correct_answer}
+                  imageData={question.imageData}
                 />
               );
             })}

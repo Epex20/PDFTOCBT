@@ -1,14 +1,18 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Upload, Download, RotateCcw, FileText, ZoomIn, ZoomOut, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { Upload, Download, RotateCcw, FileText, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Sparkles, Save, CheckCircle } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { saveAs } from 'file-saver'
 import JSZip from 'jszip'
 import { Document, Page, pdfjs } from 'react-pdf'
+import { supabase } from '@/integrations/supabase/client'
+import { Progress } from '@/components/ui/progress'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
@@ -33,6 +37,7 @@ interface QuestionData {
 
 export default function PdfCropper() {
   const { toast } = useToast()
+  const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -52,6 +57,7 @@ export default function PdfCropper() {
   const [showResults, setShowResults] = useState(false)
   const [currentTestQuestion, setCurrentTestQuestion] = useState(0)
   const [testAnswers, setTestAnswers] = useState<Record<string, string>>({})
+  const [visitedTestQuestions, setVisitedTestQuestions] = useState<Set<number>>(new Set([0]))
   const [testStartTime, setTestStartTime] = useState<Date | null>(null)
   const [testEndTime, setTestEndTime] = useState<Date | null>(null)
   
@@ -59,6 +65,37 @@ export default function PdfCropper() {
   const [isDragging, setIsDragging] = useState(false)
   const [currentCrop, setCurrentCrop] = useState<CropData | null>(null)
   const [startPoint, setStartPoint] = useState<{ x: number; y: number } | null>(null)
+  const [smartCropping, setSmartCropping] = useState(true) // Enable smart cropping by default
+  
+  // User and test saving state
+  const [user, setUser] = useState<any>(null)
+  const [testTitle, setTestTitle] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Check for authenticated user on component mount
+  useEffect(() => {
+    const getUser = async () => {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser()
+        console.log('Auth check result:', { user, error })
+        if (error) {
+          console.error('Auth error:', error)
+        }
+        setUser(user)
+      } catch (error) {
+        console.error('Error getting user:', error)
+      }
+    }
+    getUser()
+
+    // Also listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('Auth state change:', event, session?.user)
+      setUser(session?.user ?? null)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   // File handling
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -158,7 +195,94 @@ export default function PdfCropper() {
     }
   }
 
-  // Precise image cropping function
+  // Function to detect content boundaries and trim whitespace
+  const detectContentBounds = (canvas: HTMLCanvasElement): { x: number, y: number, width: number, height: number } => {
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      console.log('❌ No canvas context available')
+      return { x: 0, y: 0, width: canvas.width, height: canvas.height }
+    }
+
+    console.log('🔍 Starting content detection on canvas:', canvas.width, 'x', canvas.height)
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const data = imageData.data
+    const width = canvas.width
+    const height = canvas.height
+
+    // Function to check if a pixel is considered "content" (not white/light background)
+    const isContentPixel = (r: number, g: number, b: number, a: number): boolean => {
+      // Consider pixel as content if it's not white/very light gray
+      const brightness = (r + g + b) / 3
+      const isOpaque = a > 200 // Mostly opaque
+      const isNotWhite = brightness < 250 // More lenient threshold for better detection
+      return isOpaque && isNotWhite
+    }
+
+    // Sample pixels more efficiently (every nth pixel for speed)
+    const sampleRate = Math.max(1, Math.floor(Math.min(width, height) / 500)) // More samples for better accuracy
+    console.log('📊 Using sample rate:', sampleRate)
+    
+    let minX = width, maxX = 0, minY = height, maxY = 0
+    let hasContent = false
+    let contentPixelCount = 0
+
+    // Scan pixels with sampling to find content boundaries
+    for (let y = 0; y < height; y += sampleRate) {
+      for (let x = 0; x < width; x += sampleRate) {
+        const i = (y * width + x) * 4
+        const r = data[i]
+        const g = data[i + 1]
+        const b = data[i + 2]
+        const a = data[i + 3]
+
+        if (isContentPixel(r, g, b, a)) {
+          hasContent = true
+          contentPixelCount++
+          minX = Math.min(minX, x)
+          maxX = Math.max(maxX, x)
+          minY = Math.min(minY, y)
+          maxY = Math.max(maxY, y)
+        }
+      }
+    }
+
+    console.log('📈 Content pixels found:', contentPixelCount)
+
+    if (!hasContent) {
+      console.log('⚠️ No content detected, using full canvas')
+      return { x: 0, y: 0, width: canvas.width, height: canvas.height }
+    }
+
+    // Add moderate padding around detected content
+    const paddingPercent = 0.05 // 5% of the smaller dimension
+    const padding = Math.max(10, Math.floor(Math.min(width, height) * paddingPercent))
+    
+    const contentX = Math.max(0, minX - padding)
+    const contentY = Math.max(0, minY - padding)
+    const contentWidth = Math.min(width - contentX, maxX - minX + (padding * 2))
+    const contentHeight = Math.min(height - contentY, maxY - minY + (padding * 2))
+
+    // Ensure minimum dimensions (don't crop too aggressively)
+    const minWidth = Math.min(width * 0.5, 200) // More conservative minimum
+    const minHeight = Math.min(height * 0.5, 200)
+
+    const finalWidth = Math.max(contentWidth, minWidth)
+    const finalHeight = Math.max(contentHeight, minHeight)
+
+    console.log('✅ Content bounds detected:', { 
+      contentX, 
+      contentY, 
+      contentWidth: finalWidth, 
+      contentHeight: finalHeight,
+      originalBounds: { minX, maxX, minY, maxY },
+      padding: padding
+    })
+
+    return { x: contentX, y: contentY, width: finalWidth, height: finalHeight }
+  }
+
+  // Precise image cropping function with smart content detection
   const cropImageOnly = async (cropData: CropData): Promise<string> => {
     if (!pageRef.current) {
       throw new Error('Page reference not available')
@@ -188,30 +312,67 @@ export default function PdfCropper() {
     
     console.log('Actual crop coordinates:', { actualX, actualY, actualWidth, actualHeight })
 
-    // Create a new canvas for the cropped area
-    const croppedCanvas = document.createElement('canvas')
-    const ctx = croppedCanvas.getContext('2d')
-    if (!ctx) {
+    // Create a temporary canvas for the initial crop
+    const tempCanvas = document.createElement('canvas')
+    const tempCtx = tempCanvas.getContext('2d')
+    if (!tempCtx) {
       throw new Error('Could not get canvas context')
     }
 
     // Set dimensions to match the crop area
-    croppedCanvas.width = actualWidth
-    croppedCanvas.height = actualHeight
+    tempCanvas.width = actualWidth
+    tempCanvas.height = actualHeight
 
-    // Extract the cropped portion
-    ctx.drawImage(
+    // Extract the initial cropped portion
+    tempCtx.drawImage(
       canvas,
       actualX, actualY, actualWidth, actualHeight,  // Source coordinates
       0, 0, actualWidth, actualHeight               // Destination coordinates
     )
 
-    // Convert to high-quality data URL
-    const imageData = croppedCanvas.toDataURL('image/png', 1.0)
-    console.log('✅ Cropped image created, size:', imageData.length, 'bytes')
-    console.log('Cropped canvas size:', croppedCanvas.width, 'x', croppedCanvas.height)
-    
-    return imageData
+    // Apply smart cropping if enabled
+    if (smartCropping) {
+      console.log('🎯 Smart cropping ENABLED - detecting content bounds...')
+      // Detect content boundaries to trim whitespace
+      const contentBounds = detectContentBounds(tempCanvas)
+
+      // Create final canvas with trimmed dimensions
+      const finalCanvas = document.createElement('canvas')
+      const finalCtx = finalCanvas.getContext('2d')
+      if (!finalCtx) {
+        throw new Error('Could not get final canvas context')
+      }
+
+      finalCanvas.width = contentBounds.width
+      finalCanvas.height = contentBounds.height
+
+      // Draw only the content area to the final canvas
+      finalCtx.drawImage(
+        tempCanvas,
+        contentBounds.x, contentBounds.y, contentBounds.width, contentBounds.height,  // Source
+        0, 0, contentBounds.width, contentBounds.height                                // Destination
+      )
+
+      // Convert to high-quality data URL
+      const imageData = finalCanvas.toDataURL('image/png', 1.0)
+      console.log('✅ Smart cropped image created, size:', imageData.length, 'bytes')
+      console.log('Final canvas size:', finalCanvas.width, 'x', finalCanvas.height)
+      console.log('Whitespace removed:', {
+        originalSize: `${tempCanvas.width}x${tempCanvas.height}`,
+        finalSize: `${finalCanvas.width}x${finalCanvas.height}`,
+        spaceSaved: `${Math.round(((tempCanvas.width * tempCanvas.height) - (finalCanvas.width * finalCanvas.height)) / (tempCanvas.width * tempCanvas.height) * 100)}%`
+      })
+      
+      return imageData
+    } else {
+      console.log('📏 Smart cropping DISABLED - using manual crop bounds')
+      // Use manual cropping (original behavior)
+      const imageData = tempCanvas.toDataURL('image/png', 1.0)
+      console.log('✅ Manual cropped image created, size:', imageData.length, 'bytes')
+      console.log('Manual canvas size:', tempCanvas.width, 'x', tempCanvas.height)
+      
+      return imageData
+    }
   }
 
   // Add question with cropped image
@@ -235,7 +396,9 @@ export default function PdfCropper() {
 
       toast({
         title: "Question added",
-        description: `Added Question ${newQuestion.questionNumber} - Image saved successfully`,
+        description: smartCropping 
+          ? `Added Question ${newQuestion.questionNumber} - Smart cropped and saved` 
+          : `Added Question ${newQuestion.questionNumber} - Image saved successfully`,
       })
       
       console.log('✅ Question added:', newQuestion.id, 'Image size:', croppedImageData.length)
@@ -296,6 +459,7 @@ export default function PdfCropper() {
     setShowResults(false)
     setCurrentTestQuestion(0)
     setTestAnswers({})
+    setVisitedTestQuestions(new Set([0]))
     setTestStartTime(new Date())
     setTestEndTime(null)
   }
@@ -309,14 +473,23 @@ export default function PdfCropper() {
 
   const nextQuestion = () => {
     if (currentTestQuestion < questions.length - 1) {
-      setCurrentTestQuestion(currentTestQuestion + 1)
+      const nextIndex = currentTestQuestion + 1
+      setCurrentTestQuestion(nextIndex)
+      setVisitedTestQuestions(prev => new Set([...prev, nextIndex]))
     }
   }
 
   const previousQuestion = () => {
     if (currentTestQuestion > 0) {
-      setCurrentTestQuestion(currentTestQuestion - 1)
+      const prevIndex = currentTestQuestion - 1
+      setCurrentTestQuestion(prevIndex)
+      setVisitedTestQuestions(prev => new Set([...prev, prevIndex]))
     }
+  }
+
+  const navigateToTestQuestion = (questionIndex: number) => {
+    setCurrentTestQuestion(questionIndex)
+    setVisitedTestQuestions(prev => new Set([...prev, questionIndex]))
   }
 
   const finishTest = () => {
@@ -340,6 +513,203 @@ export default function PdfCropper() {
   const retakeTest = () => {
     setShowResults(false)
     startTest()
+  }
+
+  // Helper function to upload image to Supabase Storage
+  const uploadImageToStorage = async (imageData: string, questionId: string): Promise<string | null> => {
+    try {
+      console.log('Uploading image to storage for question:', questionId)
+      
+      // Convert base64 to blob
+      const base64Data = imageData.split(',')[1]
+      const byteCharacters = atob(base64Data)
+      const byteNumbers = new Array(byteCharacters.length)
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i)
+      }
+      const byteArray = new Uint8Array(byteNumbers)
+      const blob = new Blob([byteArray], { type: 'image/png' })
+
+      // Create unique filename
+      const fileName = `questions/${user.id}/${questionId}_${Date.now()}.png`
+      
+      console.log('Uploading to path:', fileName)
+      
+      // Upload to Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('question-images')
+        .upload(fileName, blob, {
+          cacheControl: '3600',
+          upsert: true
+        })
+
+      if (error) {
+        console.error('Storage upload error:', error)
+        // If storage fails, fall back to base64 in database
+        return imageData
+      }
+
+      console.log('Upload successful:', data)
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('question-images')
+        .getPublicUrl(fileName)
+
+      console.log('Public URL generated:', publicUrl)
+      return publicUrl
+    } catch (error) {
+      console.error('Error uploading image:', error)
+      // Fallback to base64 storage if upload fails
+      return imageData
+    }
+  }
+
+  // Save test to Supabase
+  const saveTestToSupabase = async () => {
+    if (!user) {
+      toast({
+        title: "Authentication required",
+        description: "Please log in to save your test",
+        variant: "destructive"
+      })
+      return
+    }
+
+    console.log('Current user:', user)
+
+    if (questions.length === 0) {
+      toast({
+        title: "No questions to save",
+        description: "Please add some questions before saving the test",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (!testTitle.trim()) {
+      toast({
+        title: "Test title required",
+        description: "Please enter a title for your test",
+        variant: "destructive"
+      })
+      return
+    }
+
+    setIsSaving(true)
+
+    try {
+      console.log('Starting test save process...')
+      
+      // Test the database connection and user permissions
+      console.log('Testing database connection and permissions...')
+      const { data: permissionTest, error: permissionError } = await supabase
+        .from('tests')
+        .select('id')
+        .limit(1)
+
+      if (permissionError) {
+        console.error('Permission/connection error:', permissionError)
+        if (permissionError.code === 'PGRST116') {
+          throw new Error('Database table not found. Please check your database setup.')
+        } else if (permissionError.message.includes('JWT')) {
+          throw new Error('Authentication token invalid. Please log out and log back in.')
+        } else if (permissionError.message.includes('RLS')) {
+          throw new Error('Database access denied. Please check your database policies.')
+        } else {
+          throw new Error(`Database error: ${permissionError.message}`)
+        }
+      }
+
+      console.log('Database permissions verified')
+      
+      // Create the test record
+      const testPayload = {
+        user_id: user.id,
+        title: testTitle.trim(),
+        pdf_name: pdfFile?.name || 'PDF Questions',
+        status: 'ready'
+      }
+
+      console.log('Creating test with payload:', testPayload)
+
+      const { data: testData, error: testError } = await supabase
+        .from('tests')
+        .insert(testPayload)
+        .select()
+        .single()
+
+      if (testError) {
+        console.error('Test creation error:', testError)
+        throw new Error(`Failed to create test: ${testError.message}`)
+      }
+
+      console.log('Test created successfully:', testData)
+
+      // Upload images to storage and save questions
+      console.log('Uploading images to storage...')
+      const questionsToSave = []
+
+      for (const question of questions) {
+        console.log(`Processing question ${question.questionNumber}...`)
+        
+        // Upload image to storage and get URL
+        const imageUrl = await uploadImageToStorage(question.imageData, question.id)
+        
+        // Determine if we got a URL or fell back to base64
+        const isStorageUrl = imageUrl && imageUrl.startsWith('http')
+        
+        questionsToSave.push({
+          test_id: testData.id,
+          question_number: question.questionNumber,
+          question_text: JSON.stringify({
+            type: 'image',
+            imageUrl: isStorageUrl ? imageUrl : null,
+            imageData: isStorageUrl ? null : imageUrl, // Fallback to base64 if storage failed
+            questionNumber: question.questionNumber,
+            storageMethod: isStorageUrl ? 'url' : 'base64'
+          }),
+          option_a: 'Option A',
+          option_b: 'Option B',
+          option_c: 'Option C', 
+          option_d: 'Option D',
+          correct_answer: question.correctAnswer || 'A'
+        })
+        
+        console.log(`Question ${question.questionNumber} processed with ${isStorageUrl ? 'storage URL' : 'base64 fallback'}`)
+      }
+
+      console.log('Preparing to save questions with storage URLs:', questionsToSave.length)
+
+      const { error: questionsError } = await supabase
+        .from('questions')
+        .insert(questionsToSave)
+
+      if (questionsError) {
+        console.error('Questions creation error:', questionsError)
+        throw questionsError
+      }
+
+      console.log('Questions saved successfully')
+
+      toast({
+        title: "Test saved successfully!",
+        description: `"${testTitle}" has been saved to your account. Visit the dashboard to view it.`,
+      })
+
+      // Clear the form
+      setTestTitle('')
+
+    } catch (error) {
+      console.error('Detailed error saving test:', error)
+      toast({
+        title: "Failed to save test",
+        description: error.message || "There was an error saving your test. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   // Export functions
@@ -529,7 +899,49 @@ export default function PdfCropper() {
               <Button variant="outline" onClick={backToMain}>
                 🏠 Back to Question Editor
               </Button>
+              {user && (
+                <Button 
+                  onClick={() => saveTestToSupabase()}
+                  className="bg-green-600 hover:bg-green-700"
+                  disabled={!testTitle.trim()}
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  💾 Save Test
+                </Button>
+              )}
+              {!user && (
+                <Button 
+                  onClick={() => window.open('/auth', '_blank')}
+                  variant="outline"
+                  className="border-green-600 text-green-600 hover:bg-green-50"
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  Login to Save Test
+                </Button>
+              )}
             </div>
+
+            {/* Save Test Input */}
+            {user && (
+              <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                <div className="space-y-3">
+                  <Label htmlFor="test-title-results" className="text-sm font-medium text-green-800">
+                    💾 Save this test to your account:
+                  </Label>
+                  <Input
+                    id="test-title-results"
+                    type="text"
+                    placeholder="Enter test name (e.g., Math Quiz - Chapter 5)"
+                    value={testTitle}
+                    onChange={(e) => setTestTitle(e.target.value)}
+                    className="border-green-300 focus:border-green-500"
+                  />
+                  <p className="text-xs text-green-700">
+                    💡 Give your test a descriptive name so you can find it easily in your dashboard
+                  </p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -537,90 +949,239 @@ export default function PdfCropper() {
   }
 
   if (isTestMode) {
+    const progress = (Object.keys(testAnswers).length / questions.length) * 100;
+    const currentQuestion = questions[currentTestQuestion];
+
     return (
-      <div className="container mx-auto p-6 max-w-4xl">
-        <Card>
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <div>
-                <CardTitle>Question {currentTestQuestion + 1} of {questions.length}</CardTitle>
-                <CardDescription>
-                  Select your answer and click Next to continue
-                </CardDescription>
-              </div>
-              <Button variant="outline" onClick={() => setIsTestMode(false)}>
-                Exit Test
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Question Image */}
-            <div className="border rounded-lg bg-gray-50 w-full h-[85vh] flex items-center justify-center p-2">
-              {questions[currentTestQuestion]?.imageData ? (
-                <img 
-                  src={questions[currentTestQuestion].imageData} 
-                  alt={`Question ${questions[currentTestQuestion].questionNumber}`}
-                  className="max-w-full max-h-full object-contain"
-                  style={{ 
-                    minWidth: '80%',
-                    minHeight: '80%'
-                  }}
-                />
-              ) : (
-                <div className="text-gray-500 text-center">
-                  <p>Question image not available</p>
-                </div>
-              )}
-            </div>
-
-            {/* Answer Options */}
-            <div className="space-y-3">
-              <Label className="text-base font-medium">Select your answer:</Label>
-              <div className="grid gap-2">
-                {['A', 'B', 'C', 'D'].map((option) => (
-                  <Button
-                    key={option}
-                    variant={testAnswers[questions[currentTestQuestion]?.id] === option ? "default" : "outline"}
-                    className="justify-start h-12 text-left"
-                    onClick={() => handleAnswerSelect(questions[currentTestQuestion]?.id, option)}
-                  >
-                    <span className="w-8 h-8 rounded-full border-2 border-current flex items-center justify-center mr-3 text-sm font-bold">
-                      {option}
-                    </span>
-                    Option {option}
+      <div className="min-h-screen bg-[var(--gradient-hero)]">
+        <header className="bg-card/50 backdrop-blur-sm border-b sticky top-0 z-10">
+          <div className="container mx-auto px-4 py-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h1 className="text-2xl font-bold">Test Preview</h1>
+                <div className="flex items-center gap-4">
+                  <span className="text-sm text-muted-foreground">
+                    {Object.keys(testAnswers).length} of {questions.length} answered
+                  </span>
+                  <Button variant="outline" onClick={() => setIsTestMode(false)}>
+                    Exit Test
                   </Button>
-                ))}
+                </div>
+              </div>
+              <Progress value={progress} className="h-2" />
+            </div>
+          </div>
+        </header>
+
+        <main className="container mx-auto px-4 py-8">
+          <div className="grid lg:grid-cols-4 gap-8">
+            {/* Left Side - Question Display */}
+            <div className="lg:col-span-3 space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-start gap-3">
+                    <span className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-br from-primary to-secondary text-primary-foreground text-sm font-bold">
+                      {currentTestQuestion + 1}
+                    </span>
+                    <div className="flex-1">
+                      <div className="text-lg">Question {currentTestQuestion + 1}</div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        Select your answer from the options below
+                      </div>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Question Image */}
+                  {currentQuestion?.imageData && (
+                    <div className="border rounded-lg overflow-hidden bg-white">
+                      <img 
+                        src={currentQuestion.imageData} 
+                        alt={`Question ${currentQuestion.questionNumber}`}
+                        className="w-full max-w-2xl h-auto object-contain"
+                      />
+                    </div>
+                  )}
+
+                  {/* Answer Options */}
+                  <div className="space-y-3">
+                    <Label className="text-base font-medium">Select your answer:</Label>
+                    <div className="space-y-3">
+                      {['A', 'B', 'C', 'D'].map((option) => (
+                        <div
+                          key={option}
+                          className={`flex items-start space-x-3 p-4 rounded-lg border-2 transition-all cursor-pointer ${
+                            testAnswers[currentQuestion?.id] === option
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:border-primary/50"
+                          }`}
+                          onClick={() => setTestAnswers(prev => ({ ...prev, [currentQuestion?.id]: option }))}
+                        >
+                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-sm font-bold ${
+                            testAnswers[currentQuestion?.id] === option
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border"
+                          }`}>
+                            {testAnswers[currentQuestion?.id] === option ? option : option}
+                          </div>
+                          <div className="flex-1">
+                            <span className="font-semibold mr-2">{option}.</span>
+                            Option {option}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Navigation Buttons */}
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="outline"
+                  onClick={previousQuestion}
+                  disabled={currentTestQuestion === 0}
+                >
+                  <ChevronLeft className="w-4 h-4 mr-2" />
+                  Previous
+                </Button>
+
+                {currentTestQuestion === questions.length - 1 ? (
+                  <Button onClick={finishTest} className="bg-green-600 hover:bg-green-700">
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Finish Test
+                  </Button>
+                ) : (
+                  <Button onClick={nextQuestion}>
+                    Next
+                    <ChevronRight className="w-4 h-4 ml-2" />
+                  </Button>
+                )}
               </div>
             </div>
 
-            {/* Navigation */}
-            <div className="flex justify-between items-center">
-              <Button
-                variant="outline"
-                onClick={previousQuestion}
-                disabled={currentTestQuestion === 0}
-              >
-                <ChevronLeft className="h-4 w-4 mr-2" />
-                Previous
-              </Button>
-              
-              <span className="text-sm text-gray-500">
-                Question {currentTestQuestion + 1} of {questions.length}
-              </span>
-              
-              {currentTestQuestion < questions.length - 1 ? (
-                <Button onClick={nextQuestion}>
-                  Next
-                  <ChevronRight className="h-4 w-4 ml-2" />
-                </Button>
-              ) : (
-                <Button onClick={finishTest} className="bg-green-600 hover:bg-green-700">
-                  Finish Test
-                </Button>
-              )}
+            {/* Right Side - CBT Question Navigation Panel */}
+            <div className="lg:col-span-1">
+              <div className="bg-card rounded-lg border p-4 sticky top-24">
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <h3 className="text-lg font-semibold mb-3">Question Palette</h3>
+                  </div>
+
+                  {/* Legend */}
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 bg-gray-200 text-gray-600 rounded flex items-center justify-center font-medium text-xs border">
+                        {questions.length.toString().padStart(2, '0')}
+                      </div>
+                      <span className="text-gray-600">Not Visited</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 bg-red-500 text-white rounded flex items-center justify-center font-medium text-xs">
+                        01
+                      </div>
+                      <span className="text-gray-600">Not Answered</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 bg-green-500 text-white rounded flex items-center justify-center font-medium text-xs">
+                        01
+                      </div>
+                      <span className="text-gray-600">Answered</span>
+                    </div>
+                  </div>
+
+                  {/* Question Grid */}
+                  <div className="border-t pt-4">
+                    <div className="grid grid-cols-8 gap-1 max-h-96 overflow-y-auto">
+                      {questions.map((q, idx) => {
+                        const isAnswered = !!testAnswers[q.id];
+                        const isCurrent = currentTestQuestion === idx;
+                        const isVisited = visitedTestQuestions.has(idx);
+                        
+                        // Determine button style based on state
+                        let buttonClass = "w-8 h-8 text-xs font-medium rounded transition-all flex items-center justify-center border cursor-pointer ";
+                        
+                        if (isCurrent) {
+                          // Current question - highlighted border
+                          if (isAnswered) {
+                            buttonClass += "bg-green-500 text-white border-2 border-blue-400 shadow-lg";
+                          } else if (isVisited) {
+                            buttonClass += "bg-red-500 text-white border-2 border-blue-400 shadow-lg";
+                          } else {
+                            buttonClass += "bg-gray-200 text-gray-600 border-2 border-blue-400 shadow-lg";
+                          }
+                        } else if (isAnswered) {
+                          // Answered (green)
+                          buttonClass += "bg-green-500 text-white border-green-600 hover:bg-green-600";
+                        } else if (isVisited) {
+                          // Visited but not answered (red)
+                          buttonClass += "bg-red-500 text-white border-red-600 hover:bg-red-600";
+                        } else {
+                          // Not visited (gray)
+                          buttonClass += "bg-gray-200 text-gray-600 border-gray-300 hover:bg-gray-300";
+                        }
+                        
+                        return (
+                          <button
+                            key={q.id}
+                            className={buttonClass}
+                            onClick={() => navigateToTestQuestion(idx)}
+                          >
+                            {String(idx + 1).padStart(2, '0')}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Progress Summary */}
+                  <div className="border-t pt-4">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-green-600">
+                          {Object.keys(testAnswers).length}
+                        </div>
+                        <div className="text-xs text-gray-600">Answered</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-red-600">
+                          {questions.length - Object.keys(testAnswers).length}
+                        </div>
+                        <div className="text-xs text-gray-600">Not Answered</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="border-t pt-4 space-y-2">
+                    <button
+                      className="w-full px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                      onClick={() => {
+                        const nextUnanswered = questions.findIndex((q, idx) => !testAnswers[q.id] && idx > currentTestQuestion);
+                        if (nextUnanswered !== -1) {
+                          navigateToTestQuestion(nextUnanswered);
+                        }
+                      }}
+                      disabled={Object.keys(testAnswers).length === questions.length}
+                    >
+                      Next Unanswered
+                    </button>
+                    
+                    {Object.keys(testAnswers).length === questions.length && (
+                      <button
+                        onClick={finishTest}
+                        className="w-full px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Finish Test
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </main>
       </div>
     )
   }
@@ -700,6 +1261,31 @@ export default function PdfCropper() {
                       <ZoomIn className="h-4 w-4" />
                     </Button>
                   </div>
+                </div>
+              )}
+
+              {/* Smart Cropping Toggle */}
+              {pdfFile && (
+                <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-blue-600" />
+                    <div>
+                      <Label htmlFor="smart-crop" className="text-sm font-medium text-blue-900">
+                        Smart Cropping
+                      </Label>
+                      <p className="text-xs text-blue-700">
+                        Automatically trims whitespace around questions
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    id="smart-crop"
+                    checked={smartCropping}
+                    onCheckedChange={(checked) => {
+                      console.log('🔄 Smart cropping toggle changed to:', checked)
+                      setSmartCropping(checked)
+                    }}
+                  />
                 </div>
               )}
 
@@ -793,20 +1379,49 @@ export default function PdfCropper() {
             <CardContent>
               <div className="space-y-2">
                 {questions.map((question) => (
-                  <div key={question.id} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div>
-                      <span className="font-medium">Q{question.questionNumber}</span>
-                      <span className="text-sm text-gray-500 ml-2">
-                        4 options • Page {question.cropData.page}
-                      </span>
+                  <div key={question.id} className="p-3 border rounded-lg space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-medium">Q{question.questionNumber}</span>
+                        <span className="text-sm text-gray-500 ml-2">
+                          Page {question.cropData.page}
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => removeQuestion(question.id)}
+                      >
+                        Remove
+                      </Button>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => removeQuestion(question.id)}
-                    >
-                      Remove
-                    </Button>
+                    
+                    {/* Answer Key Selection */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Correct Answer:</Label>
+                      <Select
+                        value={question.correctAnswer || 'A'}
+                        onValueChange={(value) => {
+                          setQuestions(prev => 
+                            prev.map(q => 
+                              q.id === question.id 
+                                ? { ...q, correctAnswer: value as 'A' | 'B' | 'C' | 'D' }
+                                : q
+                            )
+                          )
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="A">A</SelectItem>
+                          <SelectItem value="B">B</SelectItem>
+                          <SelectItem value="C">C</SelectItem>
+                          <SelectItem value="D">D</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 ))}
                 
@@ -825,6 +1440,95 @@ export default function PdfCropper() {
               <CardTitle>Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              {/* Save Test Section */}
+              {user && (
+                <div className="space-y-2 p-3 bg-green-50 rounded-lg border border-green-200">
+                  <Label htmlFor="test-title" className="text-sm font-medium text-green-900">
+                    Save Test to Account
+                  </Label>
+                  <div className="text-xs text-green-700 mb-2">
+                    Logged in as: {user.email}
+                  </div>
+                  <Input
+                    id="test-title"
+                    placeholder="Enter test title..."
+                    value={testTitle}
+                    onChange={(e) => setTestTitle(e.target.value)}
+                    className="bg-white"
+                  />
+                  <Button
+                    onClick={saveTestToSupabase}
+                    className="w-full bg-green-600 hover:bg-green-700"
+                    disabled={questions.length === 0 || isSaving || !testTitle.trim()}
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {isSaving ? 'Saving...' : 'Save Test'}
+                  </Button>
+                  <Button
+                    onClick={() => navigate('/dashboard')}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    View Dashboard
+                  </Button>
+                  
+                  {/* Debug button to test database access */}
+                  <Button
+                    onClick={async () => {
+                      try {
+                        console.log('Testing database access...')
+                        console.log('Current user:', user)
+                        
+                        // Test 1: Check auth
+                        const { data: authData, error: authError } = await supabase.auth.getUser()
+                        console.log('Auth test:', { authData, authError })
+                        
+                        // Test 2: Check database read access
+                        const { data, error } = await supabase
+                          .from('tests')
+                          .select('id, title')
+                          .limit(5)
+                        
+                        console.log('Database read test:', { data, error })
+                        
+                        if (error) {
+                          toast({
+                            title: "Database Test Failed",
+                            description: `Error: ${error.message} (Code: ${error.code})`,
+                            variant: "destructive"
+                          })
+                        } else {
+                          toast({
+                            title: "Database Test Successful",
+                            description: `Auth: ${authData.user ? 'OK' : 'FAIL'}, Found ${data.length} tests`,
+                          })
+                        }
+                      } catch (err) {
+                        console.error('Database test exception:', err)
+                        toast({
+                          title: "Test Exception",
+                          description: err.message,
+                          variant: "destructive"
+                        })
+                      }
+                    }}
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-xs"
+                  >
+                    Test Database Connection
+                  </Button>
+                </div>
+              )}
+
+              {!user && (
+                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-sm text-blue-800 text-center">
+                    <a href="/auth" className="font-medium underline">Login</a> to save tests to your account
+                  </p>
+                </div>
+              )}
+
               <Button
                 onClick={startTest}
                 className="w-full"

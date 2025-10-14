@@ -25,7 +25,7 @@ const Auth = () => {
             </div>
           </div>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-            TestCraft
+            PDFtoCBT
           </h1>
           <p className="text-muted-foreground">
             Transform PDFs into interactive computer-based tests

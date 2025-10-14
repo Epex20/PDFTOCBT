@@ -63,32 +63,37 @@ const Dashboard = () => {
   const handleFileSelect = async (file: File) => {
     if (!user) return;
 
-    // Here you would integrate your PDF to CBT conversion code
-    // For now, we'll create a test entry
-    const { data, error } = await supabase
-      .from("tests")
-      .insert({
-        user_id: user.id,
-        title: file.name.replace(".pdf", ""),
-        pdf_name: file.name,
-        status: "ready",
-      })
-      .select()
-      .single();
+    // Test creation disabled - file upload only
+    toast({
+      title: "File uploaded",
+      description: "File selected successfully. Use PDF Cropper for question creation.",
+    });
 
-    if (error) {
-      toast({
-        title: "Error creating test",
-        description: error.message,
-        variant: "destructive",
-      });
-    } else {
-      toast({
-        title: "Test created successfully!",
-        description: "Your PDF has been processed.",
-      });
-      fetchTests(user.id);
-    }
+    // TODO: Add your PDF processing logic here when ready
+    // const { data, error } = await supabase
+    //   .from("tests")
+    //   .insert({
+    //     user_id: user.id,
+    //     title: file.name.replace(".pdf", ""),
+    //     pdf_name: file.name,
+    //     status: "ready",
+    //   })
+    //   .select()
+    //   .single();
+
+    // if (error) {
+    //   toast({
+    //     title: "Error creating test",
+    //     description: error.message,
+    //     variant: "destructive",
+    //   });
+    // } else {
+    //   toast({
+    //     title: "Test created successfully!",
+    //     description: "Your PDF has been processed.",
+    //   });
+    //   fetchTests(user.id);
+    // }
   };
 
   return (
@@ -98,7 +103,7 @@ const Dashboard = () => {
           <div className="flex items-center gap-2">
             <GraduationCap className="w-8 h-8 text-primary" />
             <span className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              TestCraft
+              PDFtoCBT
             </span>
           </div>
           <Button variant="outline" onClick={handleLogout}>
@@ -163,8 +168,12 @@ const Dashboard = () => {
                 size="sm"
                 onClick={async () => {
                   if (confirm("Are you sure you want to delete all tests? This cannot be undone.")) {
+                    // First delete all questions for all tests by this user
+                    for (const test of tests) {
+                      await supabase.from("questions").delete().eq("test_id", test.id);
+                    }
+                    // Then delete all tests by this user
                     await supabase.from("tests").delete().eq("user_id", user.id);
-                    await supabase.from("questions").delete().eq("test_id", tests.map(t => t.id));
                     fetchTests(user.id);
                     toast({ title: "All tests deleted" });
                   }

@@ -22,7 +22,7 @@ const Index = () => {
           <div className="flex items-center gap-2">
             <GraduationCap className="w-8 h-8 text-primary" />
             <span className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              TestCraft
+              PDFtoCBT
             </span>
           </div>
           <Button onClick={() => navigate("/auth")}>Get Started</Button>
@@ -97,7 +97,7 @@ const Index = () => {
 
       <footer className="border-t bg-card/50 backdrop-blur-sm mt-20">
         <div className="container mx-auto px-4 py-8 text-center text-muted-foreground">
-          <p>&copy; 2025 TestCraft. Transform your assessments.</p>
+          <p>&copy; 2025 PDFtoCBT. Transform your assessments.</p>
         </div>
       </footer>
     </div>
