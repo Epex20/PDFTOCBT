@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { GraduationCap, FileText, CheckCircle, BarChart } from "lucide-react";
+import { AppHeader } from "@/components/AppHeader";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -17,17 +18,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-[var(--gradient-hero)]">
-      <header className="border-b bg-card/50 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <GraduationCap className="w-8 h-8 text-primary" />
-            <span className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              PDFtoCBT
-            </span>
-          </div>
-          <Button onClick={() => navigate("/auth")}>Get Started</Button>
-        </div>
-      </header>
+      <AppHeader showLogout={false} />
 
       <main className="container mx-auto px-4 py-16 space-y-20">
         <section className="text-center space-y-6 max-w-3xl mx-auto">

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { QuestionCard } from "@/components/QuestionCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Trophy, CheckCircle, XCircle } from "lucide-react";
+import { AppHeader } from "@/components/AppHeader";
 
 const Review = () => {
   const { testId } = useParams();
@@ -76,6 +77,8 @@ const Review = () => {
 
   return (
     <div className="min-h-screen bg-[var(--gradient-hero)]">
+      <AppHeader showLogout={true} />
+      
       <header className="bg-card/50 backdrop-blur-sm border-b">
         <div className="container mx-auto px-4 py-4">
           <Button variant="outline" onClick={() => navigate("/dashboard")}>

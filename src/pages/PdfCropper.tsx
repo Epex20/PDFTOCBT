@@ -13,6 +13,7 @@ import JSZip from 'jszip'
 import { Document, Page, pdfjs } from 'react-pdf'
 import { supabase } from '@/integrations/supabase/client'
 import { Progress } from '@/components/ui/progress'
+import { AppHeader } from '@/components/AppHeader'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
@@ -1187,11 +1188,14 @@ export default function PdfCropper() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="text-center">
-        <h1 className="text-3xl font-bold mb-2">PDF to CBT Converter</h1>
-        <p className="text-gray-600">Upload a PDF and crop question areas to create CBT tests</p>
-      </div>
+    <div className="min-h-screen bg-[var(--gradient-hero)]">
+      <AppHeader showLogout={true} />
+      
+      <div className="container mx-auto p-6 space-y-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold mb-2">PDF to CBT Converter</h1>
+          <p className="text-gray-600">Upload a PDF and crop question areas to create CBT tests</p>
+        </div>
 
       <div className="grid md:grid-cols-3 gap-6">
         {/* Left Panel - PDF Viewer */}
@@ -1550,6 +1554,7 @@ export default function PdfCropper() {
           </Card>
         </div>
       </div>
+    </div>
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { QuestionCard } from "@/components/QuestionCard";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, ArrowRight, CheckCircle } from "lucide-react";
+import { AppHeader } from "@/components/AppHeader";
 
 const Test = () => {
   const { testId } = useParams();
@@ -114,6 +115,8 @@ const Test = () => {
 
   return (
     <div className="min-h-screen bg-[var(--gradient-hero)]">
+      <AppHeader showLogout={true} />
+      
       <header className="bg-card/50 backdrop-blur-sm border-b sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4">
           <div className="space-y-2">

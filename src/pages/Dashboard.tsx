@@ -4,13 +4,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { FileUpload } from "@/components/FileUpload";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, GraduationCap, FileText, Clock, Scissors } from "lucide-react";
+import { LogOut, GraduationCap, FileText, Clock, Scissors, Trash2, Check } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { AppHeader } from "@/components/AppHeader";
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
   const [tests, setTests] = useState<any[]>([]);
+  const [selectedTests, setSelectedTests] = useState<string[]>([]);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -60,6 +64,65 @@ const Dashboard = () => {
     navigate("/auth");
   };
 
+  const toggleTestSelection = (testId: string) => {
+    setSelectedTests(prev => 
+      prev.includes(testId) 
+        ? prev.filter(id => id !== testId)
+        : [...prev, testId]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedTests.length === tests.length) {
+      setSelectedTests([]);
+    } else {
+      setSelectedTests(tests.map(test => test.id));
+    }
+  };
+
+  const deleteSelectedTests = async () => {
+    if (selectedTests.length === 0) return;
+
+    const confirmMessage = selectedTests.length === 1 
+      ? "Are you sure you want to delete this test? This cannot be undone."
+      : `Are you sure you want to delete ${selectedTests.length} tests? This cannot be undone.`;
+
+    if (confirm(confirmMessage)) {
+      try {
+        // First delete all questions for selected tests
+        for (const testId of selectedTests) {
+          await supabase.from("questions").delete().eq("test_id", testId);
+        }
+        
+        // Then delete the selected tests
+        const { error } = await supabase
+          .from("tests")
+          .delete()
+          .in("id", selectedTests);
+
+        if (error) throw error;
+
+        // Refresh the tests list
+        fetchTests(user.id);
+        
+        // Reset selection
+        setSelectedTests([]);
+        setIsSelectionMode(false);
+
+        toast({ 
+          title: "Tests deleted", 
+          description: `${selectedTests.length} test(s) deleted successfully.`
+        });
+      } catch (error) {
+        toast({
+          title: "Error deleting tests",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
   const handleFileSelect = async (file: File) => {
     if (!user) return;
 
@@ -98,20 +161,7 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-[var(--gradient-hero)]">
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <GraduationCap className="w-8 h-8 text-primary" />
-            <span className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              PDFtoCBT
-            </span>
-          </div>
-          <Button variant="outline" onClick={handleLogout}>
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
-          </Button>
-        </div>
-      </header>
+      <AppHeader showLogout={true} />
 
       <main className="container mx-auto px-4 py-8 space-y-8">
         <div className="space-y-2">
@@ -163,24 +213,47 @@ const Dashboard = () => {
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold">Your Tests</h2>
             {tests.length > 0 && (
-              <Button 
-                variant="destructive" 
-                size="sm"
-                onClick={async () => {
-                  if (confirm("Are you sure you want to delete all tests? This cannot be undone.")) {
-                    // First delete all questions for all tests by this user
-                    for (const test of tests) {
-                      await supabase.from("questions").delete().eq("test_id", test.id);
-                    }
-                    // Then delete all tests by this user
-                    await supabase.from("tests").delete().eq("user_id", user.id);
-                    fetchTests(user.id);
-                    toast({ title: "All tests deleted" });
-                  }
-                }}
-              >
-                Clear All Tests
-              </Button>
+              <div className="flex gap-2">
+                {!isSelectionMode ? (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setIsSelectionMode(true)}
+                  >
+                    Select Tests
+                  </Button>
+                ) : (
+                  <>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={toggleSelectAll}
+                    >
+                      <Check className="h-4 w-4 mr-2" />
+                      {selectedTests.length === tests.length ? 'Deselect All' : 'Select All'}
+                    </Button>
+                    <Button 
+                      variant="destructive" 
+                      size="sm"
+                      onClick={deleteSelectedTests}
+                      disabled={selectedTests.length === 0}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete Selected ({selectedTests.length})
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => {
+                        setIsSelectionMode(false);
+                        setSelectedTests([]);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                )}
+              </div>
             )}
           </div>
           {tests.length === 0 ? (
@@ -198,10 +271,29 @@ const Dashboard = () => {
               {tests.map((test) => (
                 <Card
                   key={test.id}
-                  className="hover:shadow-[var(--shadow-glow)] transition-all duration-300 cursor-pointer"
-                  onClick={() => navigate(`/test/${test.id}`)}
+                  className={`hover:shadow-[var(--shadow-glow)] transition-all duration-300 relative ${
+                    isSelectionMode ? 'cursor-default' : 'cursor-pointer'
+                  } ${
+                    selectedTests.includes(test.id) ? 'ring-2 ring-primary bg-primary/5' : ''
+                  }`}
+                  onClick={() => {
+                    if (isSelectionMode) {
+                      toggleTestSelection(test.id);
+                    } else {
+                      navigate(`/test/${test.id}`);
+                    }
+                  }}
                 >
-                  <CardHeader>
+                  {isSelectionMode && (
+                    <div className="absolute top-3 left-3 z-10">
+                      <Checkbox
+                        checked={selectedTests.includes(test.id)}
+                        onCheckedChange={() => toggleTestSelection(test.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  )}
+                  <CardHeader className={isSelectionMode ? 'pl-10' : ''}>
                     <CardTitle className="flex items-center gap-2">
                       <FileText className="w-5 h-5 text-primary" />
                       {test.title}
@@ -211,8 +303,15 @@ const Dashboard = () => {
                       {new Date(test.created_at).toLocaleDateString()}
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    <Button className="w-full">Start Test</Button>
+                  <CardContent className={isSelectionMode ? 'pl-10' : ''}>
+                    {!isSelectionMode && (
+                      <Button className="w-full">Start Test</Button>
+                    )}
+                    {isSelectionMode && (
+                      <div className="text-sm text-muted-foreground">
+                        {selectedTests.includes(test.id) ? 'Selected for deletion' : 'Click to select'}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               ))}
