@@ -6,6 +6,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import AuthCallback from "./pages/AuthCallback";
+import EmailConfirmation from "./pages/EmailConfirmation";
+import ConfirmEmail from "./pages/ConfirmEmail";
 import Dashboard from "./pages/Dashboard";
 import Test from "./pages/Test";
 import Review from "./pages/Review";
@@ -25,6 +28,9 @@ const AppContent = () => {
     <Routes>
       <Route path="/" element={<Index />} />
       <Route path="/auth" element={<Auth />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/email-confirmation" element={<EmailConfirmation />} />
+      <Route path="/confirm-email" element={<ConfirmEmail />} />
       <Route path="/dashboard" element={
         <ProtectedRoute>
           <Dashboard />

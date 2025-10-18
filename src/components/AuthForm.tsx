@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ export const AuthForm = ({ onSuccess }: AuthFormProps) => {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,18 +41,14 @@ export const AuthForm = ({ onSuccess }: AuthFormProps) => {
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/`,
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
           },
         });
         if (error) throw error;
-        toast({
-          title: "Account created!",
-          description: "You can now log in.",
-        });
-        setIsLogin(true);
-        // Clear fields after successful signup
-        setEmail("");
-        setPassword("");
+        
+        // Redirect to email confirmation page with the email parameter
+        navigate(`/email-confirmation?email=${encodeURIComponent(email)}`);
+        return; // Don't continue with the rest of the logic
       }
     } catch (error: any) {
       toast({
