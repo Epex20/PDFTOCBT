@@ -10,27 +10,57 @@ import Test from "./pages/Test";
 import Review from "./pages/Review";
 import PdfCropper from "./pages/PdfCropper";
 import NotFound from "./pages/NotFound";
+import ProtectedRoute from "./components/ProtectedRoute";
+import { AuthProvider } from "./contexts/AuthContext";
+import { useSessionValidation } from "./hooks/useSessionValidation";
 
 const queryClient = new QueryClient();
 
+// Inner component that uses the session validation hook
+const AppContent = () => {
+  useSessionValidation();
+
+  return (
+    <Routes>
+      <Route path="/" element={<Index />} />
+      <Route path="/auth" element={<Auth />} />
+      <Route path="/dashboard" element={
+        <ProtectedRoute>
+          <Dashboard />
+        </ProtectedRoute>
+      } />
+      <Route path="/pdf-cropper" element={
+        <ProtectedRoute>
+          <PdfCropper />
+        </ProtectedRoute>
+      } />
+      <Route path="/test/:testId" element={
+        <ProtectedRoute>
+          <Test />
+        </ProtectedRoute>
+      } />
+      <Route path="/review/:testId" element={
+        <ProtectedRoute>
+          <Review />
+        </ProtectedRoute>
+      } />
+      {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  );
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/auth" element={<Auth />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/pdf-cropper" element={<PdfCropper />} />
-          <Route path="/test/:testId" element={<Test />} />
-          <Route path="/review/:testId" element={<Review />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
+    <AuthProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </TooltipProvider>
+    </AuthProvider>
   </QueryClientProvider>
 );
 

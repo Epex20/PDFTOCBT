@@ -126,37 +126,39 @@ const Dashboard = () => {
   const handleFileSelect = async (file: File) => {
     if (!user) return;
 
-    // Test creation disabled - file upload only
+    // Validate PDF file
+    if (file.type !== "application/pdf") {
+      toast({
+        title: "Invalid file type",
+        description: "Please select a PDF file only.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check file size (max 50MB)
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (file.size > maxSize) {
+      toast({
+        title: "File too large",
+        description: "Please select a PDF file smaller than 50MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     toast({
-      title: "File uploaded",
-      description: "File selected successfully. Use PDF Cropper for question creation.",
+      title: "PDF Selected",
+      description: `${file.name} ready for cropping. Redirecting to PDF Cropper...`,
     });
 
-    // TODO: Add your PDF processing logic here when ready
-    // const { data, error } = await supabase
-    //   .from("tests")
-    //   .insert({
-    //     user_id: user.id,
-    //     title: file.name.replace(".pdf", ""),
-    //     pdf_name: file.name,
-    //     status: "ready",
-    //   })
-    //   .select()
-    //   .single();
-
-    // if (error) {
-    //   toast({
-    //     title: "Error creating test",
-    //     description: error.message,
-    //     variant: "destructive",
-    //   });
-    // } else {
-    //   toast({
-    //     title: "Test created successfully!",
-    //     description: "Your PDF has been processed.",
-    //   });
-    //   fetchTests(user.id);
-    // }
+    // Directly redirect to PDF Cropper with the file
+    navigate('/pdf-cropper', { 
+      state: { 
+        pdfFile: file,
+        fromDashboard: true 
+      } 
+    });
   };
 
   return (
@@ -171,40 +173,57 @@ const Dashboard = () => {
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Quick Upload
+        <div className="space-y-6">
+          {/* Main PDF Cropper Section - Priority */}
+          <Card className="shadow-[var(--shadow-glow)] border-2 border-primary/20">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-3 text-xl">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Scissors className="h-6 w-6 text-primary" />
+                </div>
+                PDF Cropper - Create Your Test
               </CardTitle>
-              <CardDescription>
-                Upload PDF and auto-generate test questions
+              <CardDescription className="text-base">
+                Upload a PDF and manually crop questions for precise control and accurate test creation
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <FileUpload onFileSelect={handleFileSelect} />
+            <CardContent className="space-y-4">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button 
+                  onClick={() => navigate('/pdf-cropper')} 
+                  className="flex-1 h-12 text-base font-medium"
+                  size="lg"
+                >
+                  <Scissors className="h-5 w-5 mr-2" />
+                  Start Creating Test
+                </Button>
+                <div className="flex-1 text-sm text-muted-foreground p-3 bg-muted/50 rounded-lg">
+                  <div className="font-medium mb-1">Why use PDF Cropper?</div>
+                  <ul className="space-y-1 text-xs">
+                    <li>• Precise question extraction</li>
+                    <li>• Full control over question areas</li>
+                    <li>• Support for complex layouts</li>
+                  </ul>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Scissors className="h-5 w-5" />
-                PDF Cropper
-              </CardTitle>
-              <CardDescription>
-                Manually crop questions from PDF for precise control
+          {/* Quick Upload - Compact Section */}
+          <Card className="border-dashed border-2 hover:border-primary/50 transition-colors">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <FileText className="h-5 w-5 text-primary" />
+                  Quick PDF Upload
+                </CardTitle>
+              </div>
+              <CardDescription className="text-sm">
+                Select a PDF file and we'll guide you to create questions
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <Button 
-                onClick={() => navigate('/pdf-cropper')} 
-                className="w-full"
-                variant="outline"
-              >
-                Open PDF Cropper
-              </Button>
+            <CardContent className="pt-0">
+              <FileUpload onFileSelect={handleFileSelect} />
             </CardContent>
           </Card>
         </div>

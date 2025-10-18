@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Upload, Download, RotateCcw, FileText, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Sparkles, Save, CheckCircle } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { saveAs } from 'file-saver'
@@ -39,6 +40,7 @@ interface QuestionData {
 export default function PdfCropper() {
   const { toast } = useToast()
   const navigate = useNavigate()
+  const location = useLocation()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -72,6 +74,14 @@ export default function PdfCropper() {
   const [user, setUser] = useState<any>(null)
   const [testTitle, setTestTitle] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  
+  // Test configuration modal state
+  const [showTestConfig, setShowTestConfig] = useState(false)
+  const [timerEnabled, setTimerEnabled] = useState(false)
+  const [timerMinutes, setTimerMinutes] = useState(60)
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
+  const [shuffleQuestions, setShuffleQuestions] = useState(false)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Check for authenticated user on component mount
   useEffect(() => {
@@ -98,6 +108,36 @@ export default function PdfCropper() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Handle PDF file passed from Dashboard
+  useEffect(() => {
+    const state = location.state as { pdfFile?: File; fromDashboard?: boolean } | null
+    if (state?.pdfFile && state.fromDashboard) {
+      const file = state.pdfFile
+      setPdfFile(file)
+      const url = URL.createObjectURL(file)
+      setPdfUrl(url)
+      setCurrentPage(1)
+      setQuestions([])
+      
+      toast({
+        title: "PDF loaded from Dashboard",
+        description: `${file.name} is ready for cropping questions`,
+      })
+
+      // Clear the state to prevent reloading on refresh
+      window.history.replaceState(null, '', '/pdf-cropper')
+    }
+  }, [location.state, toast])
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+      }
+    }
+  }, [])
+
   // File handling
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -120,6 +160,50 @@ export default function PdfCropper() {
       })
     }
   }
+
+  // Drag and drop handlers for PDF upload
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    const files = e.dataTransfer.files
+    if (files && files[0]) {
+      const file = files[0]
+      if (file.type === 'application/pdf') {
+        setPdfFile(file)
+        const url = URL.createObjectURL(file)
+        setPdfUrl(url)
+        setCurrentPage(1)
+        setQuestions([])
+        
+        toast({
+          title: "PDF loaded",
+          description: "You can now crop questions from the PDF",
+        })
+      } else {
+        toast({
+          title: "Invalid file type",
+          description: "Please drop a PDF file only",
+          variant: "destructive"
+        })
+      }
+    }
+  }, [toast])
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setTotalPages(numPages)
@@ -456,6 +540,17 @@ export default function PdfCropper() {
       return
     }
     
+    // Show test configuration modal
+    setShowTestConfig(true)
+  }
+
+  const confirmStartTest = () => {
+    // Shuffle questions if enabled
+    if (shuffleQuestions) {
+      const shuffledQuestions = [...questions].sort(() => Math.random() - 0.5)
+      setQuestions(shuffledQuestions)
+    }
+    
     setIsTestMode(true)
     setShowResults(false)
     setCurrentTestQuestion(0)
@@ -463,6 +558,42 @@ export default function PdfCropper() {
     setVisitedTestQuestions(new Set([0]))
     setTestStartTime(new Date())
     setTestEndTime(null)
+    setShowTestConfig(false)
+    
+    // Start timer if enabled
+    if (timerEnabled) {
+      const totalSeconds = timerMinutes * 60
+      setTimeRemaining(totalSeconds)
+      startTimer(totalSeconds)
+    }
+  }
+
+  const startTimer = (seconds: number) => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+    }
+    
+    timerRef.current = setInterval(() => {
+      setTimeRemaining(prev => {
+        if (prev === null || prev <= 1) {
+          // Timer finished - auto-submit test
+          finishTest()
+          return null
+        }
+        return prev - 1
+      })
+    }, 1000)
+  }
+
+  const formatTime = (seconds: number): string => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
+    
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`
   }
 
   const handleAnswerSelect = (questionId: string, answer: string) => {
@@ -497,6 +628,13 @@ export default function PdfCropper() {
     setTestEndTime(new Date())
     setIsTestMode(false)
     setShowResults(true)
+    setTimeRemaining(null)
+    
+    // Clear timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
     
     toast({
       title: "Test completed",
@@ -961,6 +1099,15 @@ export default function PdfCropper() {
               <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold">Test Preview</h1>
                 <div className="flex items-center gap-4">
+                  {timeRemaining !== null && (
+                    <div className={`text-lg font-mono font-bold px-3 py-1 rounded-lg ${
+                      timeRemaining <= 300 ? 'bg-red-100 text-red-700' : 
+                      timeRemaining <= 600 ? 'bg-yellow-100 text-yellow-700' : 
+                      'bg-green-100 text-green-700'
+                    }`}>
+                      ⏱️ {formatTime(timeRemaining)}
+                    </div>
+                  )}
                   <span className="text-sm text-muted-foreground">
                     {Object.keys(testAnswers).length} of {questions.length} answered
                   </span>
@@ -1212,16 +1359,81 @@ export default function PdfCropper() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* File Upload */}
-              <div className="space-y-2">
-                <Label htmlFor="pdf-upload">Upload PDF File</Label>
-                <Input
-                  id="pdf-upload"
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileSelect}
-                  ref={fileInputRef}
-                />
-              </div>
+              {!pdfFile ? (
+                <div className="space-y-3">
+                  <Label className="text-base font-semibold">Upload PDF File</Label>
+                  <div 
+                    className="relative border-2 border-dashed border-border hover:border-primary/50 transition-all duration-300 rounded-lg bg-muted/20"
+                    onDragEnter={handleDragEnter}
+                    onDragLeave={handleDragLeave}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                  >
+                    <div className="flex flex-col items-center justify-center py-12 px-6 space-y-4">
+                      <div className="p-4 rounded-full bg-gradient-to-br from-primary/10 to-accent/10">
+                        <Upload className="w-10 h-10 text-primary" />
+                      </div>
+                      
+                      <div className="text-center space-y-2">
+                        <p className="text-lg font-medium text-foreground">
+                          Drop your PDF here
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          or click to browse your files
+                        </p>
+                      </div>
+
+                      <input
+                        id="pdf-upload"
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        onChange={handleFileSelect}
+                        ref={fileInputRef}
+                        className="hidden"
+                      />
+                      <Button 
+                        asChild 
+                        variant="outline" 
+                        size="lg"
+                        className="px-8"
+                      >
+                        <label htmlFor="pdf-upload" className="cursor-pointer">
+                          <Upload className="w-4 h-4 mr-2" />
+                          Browse PDF Files
+                        </label>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label className="text-base font-semibold">Current PDF File</Label>
+                  <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <FileText className="w-5 h-5 text-green-600" />
+                      <div>
+                        <p className="font-medium text-green-800">{pdfFile.name}</p>
+                        <p className="text-sm text-green-600">
+                          {(pdfFile.size / 1024 / 1024).toFixed(2)} MB • Ready to crop
+                        </p>
+                      </div>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => {
+                        setPdfFile(null)
+                        setPdfUrl(null)
+                        setQuestions([])
+                        setCurrentPage(1)
+                        if (fileInputRef.current) fileInputRef.current.value = ''
+                      }}
+                    >
+                      Change File
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* PDF Controls */}
               {pdfFile && (
@@ -1399,33 +1611,6 @@ export default function PdfCropper() {
                         Remove
                       </Button>
                     </div>
-                    
-                    {/* Answer Key Selection */}
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">Correct Answer:</Label>
-                      <Select
-                        value={question.correctAnswer || 'A'}
-                        onValueChange={(value) => {
-                          setQuestions(prev => 
-                            prev.map(q => 
-                              q.id === question.id 
-                                ? { ...q, correctAnswer: value as 'A' | 'B' | 'C' | 'D' }
-                                : q
-                            )
-                          )
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="A">A</SelectItem>
-                          <SelectItem value="B">B</SelectItem>
-                          <SelectItem value="C">C</SelectItem>
-                          <SelectItem value="D">D</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
                   </div>
                 ))}
                 
@@ -1446,11 +1631,11 @@ export default function PdfCropper() {
             <CardContent className="space-y-2">
               {/* Save Test Section */}
               {user && (
-                <div className="space-y-2 p-3 bg-green-50 rounded-lg border border-green-200">
-                  <Label htmlFor="test-title" className="text-sm font-medium text-green-900">
+                <div className="space-y-2 p-3 bg-muted/20 rounded-lg border">
+                  <Label htmlFor="test-title" className="text-sm font-medium">
                     Save Test to Account
                   </Label>
-                  <div className="text-xs text-green-700 mb-2">
+                  <div className="text-xs text-muted-foreground mb-2">
                     Logged in as: {user.email}
                   </div>
                   <Input
@@ -1462,7 +1647,7 @@ export default function PdfCropper() {
                   />
                   <Button
                     onClick={saveTestToSupabase}
-                    className="w-full bg-green-600 hover:bg-green-700"
+                    className="w-full"
                     disabled={questions.length === 0 || isSaving || !testTitle.trim()}
                   >
                     <Save className="h-4 w-4 mr-2" />
@@ -1474,53 +1659,6 @@ export default function PdfCropper() {
                     className="w-full"
                   >
                     View Dashboard
-                  </Button>
-                  
-                  {/* Debug button to test database access */}
-                  <Button
-                    onClick={async () => {
-                      try {
-                        console.log('Testing database access...')
-                        console.log('Current user:', user)
-                        
-                        // Test 1: Check auth
-                        const { data: authData, error: authError } = await supabase.auth.getUser()
-                        console.log('Auth test:', { authData, authError })
-                        
-                        // Test 2: Check database read access
-                        const { data, error } = await supabase
-                          .from('tests')
-                          .select('id, title')
-                          .limit(5)
-                        
-                        console.log('Database read test:', { data, error })
-                        
-                        if (error) {
-                          toast({
-                            title: "Database Test Failed",
-                            description: `Error: ${error.message} (Code: ${error.code})`,
-                            variant: "destructive"
-                          })
-                        } else {
-                          toast({
-                            title: "Database Test Successful",
-                            description: `Auth: ${authData.user ? 'OK' : 'FAIL'}, Found ${data.length} tests`,
-                          })
-                        }
-                      } catch (err) {
-                        console.error('Database test exception:', err)
-                        toast({
-                          title: "Test Exception",
-                          description: err.message,
-                          variant: "destructive"
-                        })
-                      }
-                    }}
-                    variant="ghost"
-                    size="sm"
-                    className="w-full text-xs"
-                  >
-                    Test Database Connection
                   </Button>
                 </div>
               )}
@@ -1538,7 +1676,7 @@ export default function PdfCropper() {
                 className="w-full"
                 disabled={questions.length === 0}
               >
-                Start Test Preview
+                Start Test
               </Button>
               
               <Button
@@ -1554,6 +1692,90 @@ export default function PdfCropper() {
           </Card>
         </div>
       </div>
+
+      {/* Test Configuration Modal */}
+      <Dialog open={showTestConfig} onOpenChange={setShowTestConfig}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              Start Test
+            </DialogTitle>
+            <DialogDescription>
+              Configure your test settings before starting
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            <div className="space-y-2">
+              <Label className="text-base font-semibold">Test Summary</Label>
+              <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Total Questions:</span>
+                  <span className="font-semibold">{questions.length}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-base font-medium">Enable Timer</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Auto-submit test when time is up
+                  </p>
+                </div>
+                <Switch
+                  checked={timerEnabled}
+                  onCheckedChange={setTimerEnabled}
+                />
+              </div>
+
+              {timerEnabled && (
+                <div className="space-y-2">
+                  <Label htmlFor="timer-minutes">Time Limit (minutes)</Label>
+                  <Input
+                    id="timer-minutes"
+                    type="number"
+                    min="1"
+                    max="999"
+                    value={timerMinutes}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value) || 1
+                      setTimerMinutes(Math.max(1, Math.min(999, value)))
+                    }}
+                    placeholder="Enter minutes (e.g. 30, 45, 120)"
+                    className="w-full"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-base font-medium">Shuffle Questions</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Randomize the order of questions
+                  </p>
+                </div>
+                <Switch
+                  checked={shuffleQuestions}
+                  onCheckedChange={setShuffleQuestions}
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTestConfig(false)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmStartTest} className="bg-primary">
+              <Sparkles className="h-4 w-4 mr-2" />
+              Start Test Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
     </div>
   )

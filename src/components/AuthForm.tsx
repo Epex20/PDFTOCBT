@@ -48,6 +48,9 @@ export const AuthForm = ({ onSuccess }: AuthFormProps) => {
           description: "You can now log in.",
         });
         setIsLogin(true);
+        // Clear fields after successful signup
+        setEmail("");
+        setPassword("");
       }
     } catch (error: any) {
       toast({
@@ -58,6 +61,13 @@ export const AuthForm = ({ onSuccess }: AuthFormProps) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleAuthMode = () => {
+    setIsLogin(!isLogin);
+    // Clear fields when switching between login and signup
+    setEmail("");
+    setPassword("");
   };
 
   return (
@@ -79,7 +89,6 @@ export const AuthForm = ({ onSuccess }: AuthFormProps) => {
             <Input
               id="email"
               type="email"
-              placeholder="your@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -91,7 +100,6 @@ export const AuthForm = ({ onSuccess }: AuthFormProps) => {
             <Input
               id="password"
               type="password"
-              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -119,7 +127,7 @@ export const AuthForm = ({ onSuccess }: AuthFormProps) => {
             type="button"
             variant="ghost"
             className="w-full"
-            onClick={() => setIsLogin(!isLogin)}
+            onClick={toggleAuthMode}
             disabled={loading}
           >
             {isLogin

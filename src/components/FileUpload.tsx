@@ -79,42 +79,49 @@ export const FileUpload = ({ onFileSelect }: FileUploadProps) => {
       onDragOver={handleDrag}
       onDrop={handleDrop}
     >
-      <div className="flex flex-col items-center justify-center p-12 space-y-4">
-        <div className="p-6 rounded-full bg-gradient-to-br from-primary/10 to-accent/10">
+      <div className="flex flex-col items-center justify-center p-4 sm:p-8 md:p-12 space-y-3 sm:space-y-4">
+        <div className="p-4 sm:p-6 rounded-full bg-gradient-to-br from-primary/10 to-accent/10">
           {selectedFile ? (
-            <FileText className="w-12 h-12 text-primary" />
+            <FileText className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 text-primary" />
           ) : (
-            <Upload className="w-12 h-12 text-muted-foreground" />
+            <Upload className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 text-muted-foreground" />
           )}
         </div>
         
-        <div className="text-center space-y-2">
-          <p className="text-lg font-semibold text-foreground">
+        <div className="text-center space-y-1 sm:space-y-2">
+          <p className="text-sm sm:text-base md:text-lg font-semibold text-foreground break-all sm:break-normal">
             {selectedFile ? selectedFile.name : "Drop your PDF here"}
           </p>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs sm:text-sm text-muted-foreground">
             {selectedFile
-              ? "File ready to upload"
+              ? "PDF file selected successfully"
               : "or click to browse your files"}
           </p>
         </div>
 
         <input
           type="file"
-          accept=".pdf"
+          accept=".pdf,application/pdf"
           onChange={handleFileInput}
           className="hidden"
           id="file-upload"
         />
-        <Button asChild variant="outline" size="lg">
+        <Button 
+          asChild 
+          variant="outline" 
+          size="sm" 
+          className="sm:size-default md:size-lg"
+        >
           <label htmlFor="file-upload" className="cursor-pointer">
-            Browse Files
+            <Upload className="w-4 h-4 mr-2" />
+            Browse PDF Files
           </label>
         </Button>
 
         {selectedFile && (
-          <div className="text-xs text-muted-foreground">
-            Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+          <div className="text-xs text-muted-foreground text-center space-y-1">
+            <div>Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB</div>
+            <div className="text-green-600 font-medium">✓ PDF Ready</div>
           </div>
         )}
       </div>
