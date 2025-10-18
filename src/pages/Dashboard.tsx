@@ -4,10 +4,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { FileUpload } from "@/components/FileUpload";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, GraduationCap, FileText, Clock, Scissors, Trash2, Check } from "lucide-react";
+import { LogOut, GraduationCap, FileText, Clock, Scissors, Trash2, Check, Upload } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AppHeader } from "@/components/AppHeader";
+import JSZip from "jszip";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -161,23 +162,160 @@ const Dashboard = () => {
     });
   };
 
+  const handleZipImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    // Check file extension instead of MIME type (more reliable for ZIP files)
+    const isZipFile = file.name.toLowerCase().endsWith('.zip') || 
+                     file.type === "application/zip" || 
+                     file.type === "application/x-zip-compressed";
+    
+    if (!isZipFile) {
+      toast({
+        title: "Invalid file",
+        description: "Please select a ZIP file (.zip extension)",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      console.log('Starting ZIP import for file:', file.name);
+      
+      const zip = new JSZip();
+      const contents = await zip.loadAsync(file);
+      
+      console.log('ZIP loaded successfully. Files found:', Object.keys(contents.files));
+      
+      // Look for test_data.json and question images
+      const testDataFile = contents.files['test_data.json'];
+      if (!testDataFile) {
+        console.log('test_data.json not found in ZIP');
+        toast({
+          title: "Invalid ZIP file",
+          description: "ZIP file must contain test_data.json",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      console.log('Found test_data.json');
+
+      // Parse test data
+      const testDataContent = await testDataFile.async('text');
+      console.log('Raw test data content:', testDataContent);
+      
+      const testData = JSON.parse(testDataContent);
+      console.log('Parsed test data:', testData);
+      
+      if (!testData.questions || testData.questions.length === 0) {
+        console.log('No questions found in test data');
+        toast({
+          title: "No questions found",
+          description: "ZIP file contains no questions",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      console.log(`Found ${testData.questions.length} questions`);
+
+      // Load question images from ZIP
+      const loadedQuestions = [];
+      console.log('Starting to load question images...');
+      
+      for (let i = 0; i < testData.questions.length; i++) {
+        const imageFileName = `question_${i + 1}.png`;
+        const imageFile = contents.files[imageFileName];
+        
+        console.log(`Looking for ${imageFileName}: ${imageFile ? 'found' : 'not found'}`);
+        
+        if (imageFile) {
+          const imageBlob = await imageFile.async('blob');
+          const imageDataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(imageBlob);
+          });
+          
+          loadedQuestions.push({
+            ...testData.questions[i],
+            imageData: imageDataUrl
+          });
+          console.log(`Loaded question ${i + 1} image`);
+        } else {
+          // Even if no image, add the question
+          loadedQuestions.push({
+            ...testData.questions[i],
+            imageData: testData.questions[i].imageData || null
+          });
+          console.log(`No image file for question ${i + 1}, using data from JSON`);
+        }
+      }
+      
+      console.log(`Total loaded questions: ${loadedQuestions.length}`);
+
+      if (loadedQuestions.length === 0) {
+        console.log('No questions loaded at all');
+        toast({
+          title: "No questions loaded",
+          description: "Could not load any questions from ZIP file",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      console.log('About to navigate with questions:', loadedQuestions);
+
+      toast({
+        title: "ZIP imported successfully",
+        description: `Loaded ${loadedQuestions.length} questions. Starting test...`,
+      });
+
+      // Navigate to PDF Cropper with imported questions to show test config modal
+      console.log('Navigating to PDF Cropper with imported questions...');
+      navigate('/pdf-cropper', { 
+        state: { 
+          importedQuestions: loadedQuestions,
+          testTitle: testData.title || 'Imported Test',
+          fromZipImport: true,
+          autoShowTestConfig: true
+        } 
+      });
+
+    } catch (error) {
+      console.error('ZIP import error:', error);
+      toast({
+        title: "Import failed",
+        description: "Failed to read ZIP file. Please check the file format.",
+        variant: "destructive"
+      });
+    }
+
+    // Reset the input
+    event.target.value = '';
+  };
+
   return (
     <div className="min-h-screen bg-[var(--gradient-hero)]">
       <AppHeader showLogout={true} />
 
       <main className="container mx-auto px-4 py-8 space-y-8">
         <div className="space-y-2">
-          <h1 className="text-3xl font-bold">Welcome back!</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-4xl font-bold">Welcome back!</h1>
+          <p className="text-muted-foreground text-base">
             Upload a PDF with MCQ questions to create your test
           </p>
         </div>
 
-        <div className="space-y-6">
-          {/* Main PDF Cropper Section - Priority */}
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* PDF Cropper Section - Left Side */}
           <Card className="shadow-[var(--shadow-glow)] border-2 border-primary/20">
             <CardHeader className="pb-4">
-              <CardTitle className="flex items-center gap-3 text-xl">
+              <CardTitle className="flex items-center gap-3 text-2xl">
                 <div className="p-2 rounded-lg bg-primary/10">
                   <Scissors className="h-6 w-6 text-primary" />
                 </div>
@@ -187,27 +325,54 @@ const Dashboard = () => {
                 Upload a PDF and manually crop questions for precise control and accurate test creation
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Button 
-                  onClick={() => navigate('/pdf-cropper')} 
-                  className="flex-1 h-12 text-base font-medium"
-                  size="lg"
-                >
-                  <Scissors className="h-5 w-5 mr-2" />
-                  Start Creating Test
-                </Button>
-                <div className="flex-1 text-sm text-muted-foreground p-3 bg-muted/50 rounded-lg">
-                  <div className="font-medium mb-1">Why use PDF Cropper?</div>
-                  <ul className="space-y-1 text-xs">
-                    <li>• Precise question extraction</li>
-                    <li>• Full control over question areas</li>
-                    <li>• Support for complex layouts</li>
-                  </ul>
-                </div>
-              </div>
+            <CardContent>
+              <Button 
+                onClick={() => navigate('/pdf-cropper')} 
+                className="w-full h-12 text-base font-medium"
+                size="lg"
+              >
+                <Scissors className="h-5 w-5 mr-2" />
+                Start Creating Test
+              </Button>
             </CardContent>
           </Card>
+
+          {/* Import ZIP Section - Right Side */}
+          <Card className="shadow-[var(--shadow-glow)] border-2 border-primary/20">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-3 text-2xl">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Upload className="h-6 w-6 text-primary" />
+                </div>
+                Import ZIP
+              </CardTitle>
+              <CardDescription className="text-base">
+                Import previously exported ZIP files containing test questions and start your computer based test
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <input
+                type="file"
+                accept=".zip"
+                onChange={handleZipImport}
+                className="hidden"
+                id="zip-import"
+              />
+              <Button 
+                asChild
+                className="w-full h-12 text-base font-medium"
+                size="lg"
+              >
+                <label htmlFor="zip-import" className="cursor-pointer flex items-center justify-center">
+                  <Upload className="h-5 w-5 mr-2" />
+                  Import
+                </label>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
 
           {/* Quick Upload - Compact Section */}
           <Card className="border-dashed border-2 hover:border-primary/50 transition-colors">
@@ -230,7 +395,7 @@ const Dashboard = () => {
 
         <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Your Tests</h2>
+            <h2 className="text-3xl font-bold">Your Tests</h2>
             {tests.length > 0 && (
               <div className="flex gap-2">
                 {!isSelectionMode ? (

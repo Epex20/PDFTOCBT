@@ -108,9 +108,16 @@ export default function PdfCropper() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Handle PDF file passed from Dashboard
+  // Handle PDF file or imported questions passed from Dashboard
   useEffect(() => {
-    const state = location.state as { pdfFile?: File; fromDashboard?: boolean } | null
+    const state = location.state as { 
+      pdfFile?: File; 
+      fromDashboard?: boolean;
+      importedQuestions?: any[];
+      fromZipImport?: boolean;
+      autoShowTestConfig?: boolean;
+    } | null
+
     if (state?.pdfFile && state.fromDashboard) {
       const file = state.pdfFile
       setPdfFile(file)
@@ -123,6 +130,26 @@ export default function PdfCropper() {
         title: "PDF loaded from Dashboard",
         description: `${file.name} is ready for cropping questions`,
       })
+
+      // Clear the state to prevent reloading on refresh
+      window.history.replaceState(null, '', '/pdf-cropper')
+    }
+    
+    // Handle imported questions from ZIP
+    if (state?.fromZipImport && state.importedQuestions) {
+      setQuestions(state.importedQuestions)
+      
+      toast({
+        title: "Questions imported from ZIP",
+        description: `${state.importedQuestions.length} questions loaded and ready for test`,
+      })
+
+      // Auto-show test config modal if requested
+      if (state.autoShowTestConfig) {
+        setTimeout(() => {
+          setShowTestConfig(true)
+        }, 1000)
+      }
 
       // Clear the state to prevent reloading on refresh
       window.history.replaceState(null, '', '/pdf-cropper')

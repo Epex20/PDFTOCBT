@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { QuestionCard } from "@/components/QuestionCard";
@@ -11,6 +11,7 @@ import { AppHeader } from "@/components/AppHeader";
 const Test = () => {
   const { testId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [questions, setQuestions] = useState<any[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -19,8 +20,19 @@ const Test = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    fetchQuestions();
-  }, [testId]);
+    // Check if questions are passed via router state (from ZIP import)
+    const state = location.state as { questions?: any[]; testTitle?: string; fromZipImport?: boolean } | null;
+    if (state?.fromZipImport && state.questions) {
+      setQuestions(state.questions);
+      setLoading(false);
+      toast({
+        title: "Test loaded from ZIP",
+        description: `${state.questions.length} questions ready`,
+      });
+    } else {
+      fetchQuestions();
+    }
+  }, [testId, location.state]);
 
   const fetchQuestions = async () => {
     if (!testId) return;
