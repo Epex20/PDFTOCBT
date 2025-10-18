@@ -1007,13 +1007,13 @@ export default function PdfCropper() {
                   const isAnswered = !!userAnswer
                   
                   return (
-                    <Card key={question.id} className="p-4 border-gray-200 bg-white">
+                    <Card key={question.id} className="p-4 border-border bg-card">
                       <div className="grid md:grid-cols-3 gap-4 items-center">
                         {/* Question Image */}
                         <div className="space-y-2">
                           <div className="font-medium">Question {question.questionNumber}</div>
                           {question.imageData && (
-                            <div className="border rounded overflow-hidden bg-white">
+                            <div className="border rounded overflow-hidden bg-background">
                               <img 
                                 src={question.imageData} 
                                 alt={`Question ${question.questionNumber}`}
@@ -1169,7 +1169,7 @@ export default function PdfCropper() {
                 <CardContent className="space-y-6">
                   {/* Question Image */}
                   {currentQuestion?.imageData && (
-                    <div className="border rounded-lg overflow-hidden bg-white">
+                    <div className="border rounded-lg overflow-hidden bg-card">
                       <img 
                         src={currentQuestion.imageData} 
                         alt={`Question ${currentQuestion.questionNumber}`}
@@ -1533,7 +1533,7 @@ export default function PdfCropper() {
               )}
 
               {/* PDF Display Area */}
-              <div className="border rounded-lg overflow-hidden bg-gray-50 min-h-[600px] relative">
+              <div className="border rounded-lg overflow-hidden bg-muted/30 min-h-[600px] relative">
                 {pdfFile && pdfUrl ? (
                   <Document
                     file={pdfUrl}
@@ -1590,7 +1590,7 @@ export default function PdfCropper() {
                     </div>
                   </Document>
                 ) : (
-                  <div className="flex items-center justify-center h-[400px] text-gray-500">
+                  <div className="flex items-center justify-center h-[400px] text-muted-foreground">
                     <div className="text-center">
                       <Upload className="h-12 w-12 mx-auto mb-4 opacity-50" />
                       <p>Upload a PDF file to get started</p>
@@ -1600,7 +1600,7 @@ export default function PdfCropper() {
                 
                 {isProcessingOCR && (
                   <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                    <div className="bg-white p-4 rounded-lg">
+                    <div className="bg-card p-4 rounded-lg border">
                       <p>Processing question...</p>
                     </div>
                   </div>
@@ -1670,7 +1670,7 @@ export default function PdfCropper() {
                     placeholder="Enter test title..."
                     value={testTitle}
                     onChange={(e) => setTestTitle(e.target.value)}
-                    className="bg-white"
+                    className="bg-background"
                   />
                   <Button
                     onClick={saveTestToSupabase}

@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { LogOut, GraduationCap } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface AppHeaderProps {
   showLogout?: boolean;
@@ -41,18 +42,21 @@ export const AppHeader = ({ showLogout = true }: AppHeaderProps) => {
           </span>
         </div>
         
-        {showLogout && user && (
-          <Button variant="outline" onClick={handleLogout}>
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
-          </Button>
-        )}
-        
-        {!user && (
-          <Button onClick={() => navigate("/auth")}>
-            Get Started
-          </Button>
-        )}
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          {showLogout && user && (
+            <Button variant="outline" onClick={handleLogout}>
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          )}
+          
+          {!user && (
+            <Button onClick={() => navigate("/auth")}>
+              Get Started
+            </Button>
+          )}
+        </div>
       </div>
     </header>
   );
