@@ -1,8 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { LogOut, GraduationCap } from "lucide-react";
+import { GraduationCap } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { UserProfileDropdown } from "@/components/UserProfileDropdown";
 
 interface AppHeaderProps {
   showLogout?: boolean;
@@ -10,16 +11,7 @@ interface AppHeaderProps {
 
 export const AppHeader = ({ showLogout = true }: AppHeaderProps) => {
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
-
-  const handleLogout = async () => {
-    try {
-      await signOut();
-      navigate("/");
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
-  };
+  const { user } = useAuth();
 
   const handleLogoClick = () => {
     if (user) {
@@ -44,18 +36,13 @@ export const AppHeader = ({ showLogout = true }: AppHeaderProps) => {
         
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          {showLogout && user && (
-            <Button variant="outline" onClick={handleLogout}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
-          )}
-          
-          {!user && (
+          {showLogout && user ? (
+            <UserProfileDropdown />
+          ) : !user ? (
             <Button onClick={() => navigate("/auth")}>
               Get Started
             </Button>
-          )}
+          ) : null}
         </div>
       </div>
     </header>

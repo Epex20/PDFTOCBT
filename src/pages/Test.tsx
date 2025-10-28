@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, ArrowRight, CheckCircle } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
+import { useCbtSettings } from "@/hooks/useCbtSettings";
 
 const Test = () => {
   const { testId } = useParams();
@@ -18,6 +19,15 @@ const Test = () => {
   const [visitedQuestions, setVisitedQuestions] = useState<Set<number>>(new Set([0])); // Track visited questions
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const { uiSettings } = useCbtSettings();
+
+  // Font size mapping
+  const fontSizeMap = {
+    'small': 'text-sm',
+    'medium': 'text-base',
+    'large': 'text-lg',
+    'extra-large': 'text-xl'
+  };
 
   useEffect(() => {
     // Check if questions are passed via router state (from ZIP import)
@@ -126,7 +136,7 @@ const Test = () => {
   const question = questions[currentQuestion];
 
   return (
-    <div className="min-h-screen bg-[var(--gradient-hero)]">
+    <div className={`min-h-screen bg-[var(--gradient-hero)] ${fontSizeMap[uiSettings.fontSize]}`}>
       <AppHeader showLogout={true} />
       
       <header className="bg-card/50 backdrop-blur-sm border-b sticky top-0 z-10">
@@ -138,7 +148,9 @@ const Test = () => {
                 {Object.keys(answers).length} of {questions.length} answered
               </span>
             </div>
-            <Progress value={progress} className="h-2" />
+            {uiSettings.showProgressBar && (
+              <Progress value={progress} className="h-2" />
+            )}
           </div>
         </div>
       </header>

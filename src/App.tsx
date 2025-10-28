@@ -13,10 +13,12 @@ import Dashboard from "./pages/Dashboard";
 import Test from "./pages/Test";
 import Review from "./pages/Review";
 import PdfCropper from "./pages/PdfCropper";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { AuthProvider } from "./contexts/AuthContext";
 import { useSessionValidation } from "./hooks/useSessionValidation";
+import { ThemeSync } from "./components/ThemeSync";
 
 const queryClient = new QueryClient();
 
@@ -25,35 +27,43 @@ const AppContent = () => {
   useSessionValidation();
 
   return (
-    <Routes>
-      <Route path="/" element={<Index />} />
-      <Route path="/auth" element={<Auth />} />
-      <Route path="/auth/callback" element={<AuthCallback />} />
-      <Route path="/email-confirmation" element={<EmailConfirmation />} />
-      <Route path="/confirm-email" element={<ConfirmEmail />} />
-      <Route path="/dashboard" element={
-        <ProtectedRoute>
-          <Dashboard />
-        </ProtectedRoute>
-      } />
-      <Route path="/pdf-cropper" element={
-        <ProtectedRoute>
-          <PdfCropper />
-        </ProtectedRoute>
-      } />
-      <Route path="/test/:testId" element={
-        <ProtectedRoute>
-          <Test />
-        </ProtectedRoute>
-      } />
-      <Route path="/review/:testId" element={
-        <ProtectedRoute>
-          <Review />
-        </ProtectedRoute>
-      } />
-      {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <>
+      <ThemeSync />
+      <Routes>
+        <Route path="/" element={<Index />} />
+        <Route path="/auth" element={<Auth />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/email-confirmation" element={<EmailConfirmation />} />
+        <Route path="/confirm-email" element={<ConfirmEmail />} />
+        <Route path="/dashboard" element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/pdf-cropper" element={
+          <ProtectedRoute>
+            <PdfCropper />
+          </ProtectedRoute>
+        } />
+        <Route path="/test/:testId" element={
+          <ProtectedRoute>
+            <Test />
+          </ProtectedRoute>
+        } />
+        <Route path="/review/:testId" element={
+          <ProtectedRoute>
+            <Review />
+          </ProtectedRoute>
+        } />
+        <Route path="/settings" element={
+          <ProtectedRoute>
+            <Settings />
+          </ProtectedRoute>
+        } />
+        {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </>
   );
 };
 
