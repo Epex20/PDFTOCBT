@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTheme } from 'next-themes';
 import { useCbtSettings, formatDuration } from '@/hooks/useCbtSettings';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Palette, Timer, User, RotateCcw, Save } from 'lucide-react';
+import { Settings, Palette, Timer, User, RotateCcw, Save, CheckCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
 
@@ -26,35 +26,71 @@ export const CbtSettings = () => {
     resetMiscSettings,
   } = useCbtSettings();
 
-  const { setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('ui');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Duration state for easier editing
   const [hours, setHours] = useState(Math.floor(testSettings.durationInSeconds / 3600));
   const [minutes, setMinutes] = useState(Math.floor((testSettings.durationInSeconds % 3600) / 60));
   const [seconds, setSeconds] = useState(testSettings.durationInSeconds % 60);
 
+  // Sync theme on mount and when uiSettings.theme changes
+  useEffect(() => {
+    if (uiSettings.theme && theme !== uiSettings.theme) {
+      setTheme(uiSettings.theme);
+    }
+  }, [uiSettings.theme, theme, setTheme]);
+
+  // Update duration state when testSettings changes externally (e.g., from reset)
+  useEffect(() => {
+    setHours(Math.floor(testSettings.durationInSeconds / 3600));
+    setMinutes(Math.floor((testSettings.durationInSeconds % 3600) / 60));
+    setSeconds(testSettings.durationInSeconds % 60);
+  }, [testSettings.durationInSeconds]);
+
   const handleDurationChange = (newHours: number, newMinutes: number, newSeconds: number) => {
-    setHours(newHours);
-    setMinutes(newMinutes);
-    setSeconds(newSeconds);
-    const totalSeconds = (newHours * 3600) + (newMinutes * 60) + newSeconds;
+    // Validate and clamp values
+    const clampedHours = Math.max(0, Math.min(23, newHours));
+    const clampedMinutes = Math.max(0, Math.min(59, newMinutes));
+    const clampedSeconds = Math.max(0, Math.min(59, newSeconds));
+    
+    setHours(clampedHours);
+    setMinutes(clampedMinutes);
+    setSeconds(clampedSeconds);
+    
+    const totalSeconds = (clampedHours * 3600) + (clampedMinutes * 60) + clampedSeconds;
+    
+    // Ensure at least 1 second
+    if (totalSeconds === 0) {
+      toast({
+        title: "Invalid duration",
+        description: "Test duration must be at least 1 second.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setTestSettings({ ...testSettings, durationInSeconds: totalSeconds });
   };
 
   const handleSave = () => {
-    toast({
-      title: "Settings saved",
-      description: "Your preferences have been updated successfully.",
-    });
+    setIsSaving(true);
+    
+    // Simulate save operation (settings are already saved via useEffect in the hook)
+    setTimeout(() => {
+      setIsSaving(false);
+      toast({
+        title: "Settings saved",
+        description: "Your preferences have been updated successfully.",
+      });
+    }, 300);
   };
 
   const handleResetAll = () => {
     resetAllSettings();
-    setHours(3);
-    setMinutes(0);
-    setSeconds(0);
+    // Reset will trigger useEffect to update duration fields
     toast({
       title: "Settings reset",
       description: "All settings have been restored to defaults.",
@@ -72,14 +108,32 @@ export const CbtSettings = () => {
           <div>
             <h1 className="text-3xl font-bold">Test & UI Settings</h1>
             <p className="text-muted-foreground">
-              Comprehensive settings system with three categories
+              Customize your test experience and interface preferences
             </p>
           </div>
         </div>
         <Badge variant="secondary" className="text-xs">
-          UI
+          Auto-Saved
         </Badge>
       </div>
+
+      {/* Info Card */}
+      <Card className="bg-muted/50 border-primary/20">
+        <CardContent className="pt-6">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold mb-1">Settings are automatically saved</h3>
+              <p className="text-sm text-muted-foreground">
+                Your preferences are stored in your browser and will persist across sessions. 
+                Click "Save All Changes" to see a confirmation, or use reset buttons to restore defaults.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Settings Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -107,25 +161,6 @@ export const CbtSettings = () => {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid md:grid-cols-2 gap-6">
-                {/* Main Layout */}
-                <div className="space-y-2">
-                  <Label htmlFor="mainLayout">Main Layout</Label>
-                  <Select
-                    value={uiSettings.mainLayout}
-                    onValueChange={(value: 'compact' | 'comfortable' | 'spacious') =>
-                      setUiSettings({ ...uiSettings, mainLayout: value })
-                    }
-                  >
-                    <SelectTrigger id="mainLayout">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="compact">Compact</SelectItem>
-                      <SelectItem value="comfortable">Comfortable</SelectItem>
-                      <SelectItem value="spacious">Spacious</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
 
                 {/* Theme */}
                 <div className="space-y-2">
@@ -134,7 +169,7 @@ export const CbtSettings = () => {
                     value={uiSettings.theme}
                     onValueChange={(value: 'light' | 'dark' | 'auto') => {
                       setUiSettings({ ...uiSettings, theme: value });
-                      setTheme(value); // Apply theme immediately
+                      setTheme(value === 'auto' ? 'system' : value); // Apply theme immediately
                     }}
                   >
                     <SelectTrigger id="theme">
@@ -143,9 +178,12 @@ export const CbtSettings = () => {
                     <SelectContent>
                       <SelectItem value="light">Light</SelectItem>
                       <SelectItem value="dark">Dark</SelectItem>
-                      <SelectItem value="auto">Auto</SelectItem>
+                      <SelectItem value="auto">Auto (System)</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Current: {theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark'}
+                  </p>
                 </div>
 
                 {/* Question Panel */}
@@ -188,26 +226,6 @@ export const CbtSettings = () => {
                   </Select>
                 </div>
 
-                {/* Font Size */}
-                <div className="space-y-2">
-                  <Label htmlFor="fontSize">Font Size</Label>
-                  <Select
-                    value={uiSettings.fontSize}
-                    onValueChange={(value: 'small' | 'medium' | 'large' | 'extra-large') =>
-                      setUiSettings({ ...uiSettings, fontSize: value })
-                    }
-                  >
-                    <SelectTrigger id="fontSize">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="small">Small</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="large">Large</SelectItem>
-                      <SelectItem value="extra-large">Extra Large</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
 
               {/* Toggle Settings */}
@@ -372,11 +390,18 @@ export const CbtSettings = () => {
                   id="warningBeforeExpiry"
                   type="number"
                   min="0"
+                  max={Math.floor(testSettings.durationInSeconds / 60)}
                   value={testSettings.warningBeforeExpiry}
-                  onChange={(e) =>
-                    setTestSettings({ ...testSettings, warningBeforeExpiry: parseInt(e.target.value) || 0 })
-                  }
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value) || 0;
+                    const maxWarning = Math.floor(testSettings.durationInSeconds / 60);
+                    const clampedValue = Math.max(0, Math.min(maxWarning, value));
+                    setTestSettings({ ...testSettings, warningBeforeExpiry: clampedValue });
+                  }}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Show warning {testSettings.warningBeforeExpiry} minute(s) before test ends
+                </p>
               </div>
 
               {/* Toggle Settings */}
@@ -477,20 +502,6 @@ export const CbtSettings = () => {
               </div>
 
               <div className="grid md:grid-cols-2 gap-6">
-                {/* Font Size */}
-                <div className="space-y-2">
-                  <Label htmlFor="miscFontSize">Font Size (px)</Label>
-                  <Input
-                    id="miscFontSize"
-                    type="number"
-                    min="8"
-                    max="32"
-                    value={miscSettings.fontSize}
-                    onChange={(e) =>
-                      setMiscSettings({ ...miscSettings, fontSize: parseInt(e.target.value) || 16 })
-                    }
-                  />
-                </div>
 
                 {/* Profile Image URL */}
                 <div className="space-y-2">
@@ -538,7 +549,7 @@ export const CbtSettings = () => {
               {miscSettings.profileImg && (
                 <div className="space-y-2 pt-4 border-t">
                   <Label>Profile Image Preview</Label>
-                  <div className="flex items-center justify-center p-4 bg-muted rounded-lg">
+                  <div className="flex flex-col items-center justify-center p-4 bg-muted rounded-lg gap-2">
                     <img
                       src={miscSettings.profileImg}
                       alt="Profile preview"
@@ -546,11 +557,16 @@ export const CbtSettings = () => {
                         width: `${miscSettings.imgWidth}px`,
                         height: `${miscSettings.imgHeight}px`,
                       }}
-                      className="object-cover rounded-full border-2 border-border"
+                      className="object-cover rounded-full border-2 border-border shadow-md"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'https://via.placeholder.com/100';
+                        const target = e.target as HTMLImageElement;
+                        target.onerror = null; // Prevent infinite loop
+                        target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(miscSettings.username || 'User')}&size=200&background=random`;
                       }}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      {miscSettings.imgWidth} × {miscSettings.imgHeight} pixels
+                    </p>
                   </div>
                 </div>
               )}
@@ -568,13 +584,22 @@ export const CbtSettings = () => {
 
       {/* Action Buttons */}
       <div className="flex items-center justify-between pt-6 border-t">
-        <Button variant="destructive" onClick={handleResetAll} className="gap-2">
+        <Button variant="destructive" onClick={handleResetAll} className="gap-2" disabled={isSaving}>
           <RotateCcw className="w-4 h-4" />
           Reset All Settings
         </Button>
-        <Button onClick={handleSave} className="gap-2">
-          <Save className="w-4 h-4" />
-          Save All Changes
+        <Button onClick={handleSave} className="gap-2" disabled={isSaving}>
+          {isSaving ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <CheckCircle className="w-4 h-4" />
+              Save All Changes
+            </>
+          )}
         </Button>
       </div>
     </div>
