@@ -30,11 +30,11 @@ const EmailConfirmation = () => {
                   <Mail className="w-12 h-12 text-green-600 dark:text-green-400" />
                 </div>
               </div>
-              <CardTitle className="text-3xl font-bold text-green-700 dark:text-green-400 mb-2">
-                Thank You for Signing Up! 🎉
+              <CardTitle className="text-2xl font-bold text-green-700 dark:text-green-400">
+                Check Your Email
               </CardTitle>
               <CardDescription className="text-base">
-                Please check your email to confirm your account
+                We've sent a confirmation email to verify your account
               </CardDescription>
             </CardHeader>
             
@@ -43,11 +43,11 @@ const EmailConfirmation = () => {
                 <div className="flex items-start gap-3">
                   <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
                   <div className="space-y-1">
-                    <p className="font-semibold text-green-800 dark:text-green-200 text-base">
-                      Confirmation Email Sent Successfully! ✉️
+                    <p className="font-medium text-green-800 dark:text-green-200">
+                      Confirmation email sent
                     </p>
                     <p className="text-sm text-green-700 dark:text-green-300">
-                      {email ? `We've sent a confirmation link to ${email}` : 'Check your email inbox for the confirmation link'}
+                      {email ? `Check your inbox at ${email}` : 'Check your email inbox'}
                     </p>
                   </div>
                 </div>
@@ -74,14 +74,13 @@ const EmailConfirmation = () => {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 pt-2">
+              <div className="flex flex-col gap-3">
                 <Button 
                   onClick={() => navigate('/auth')}
                   className="w-full"
                   variant="default"
-                  size="lg"
                 >
-                  Back to Login Page
+                  Back to Login
                 </Button>
                 
                 <Button 
