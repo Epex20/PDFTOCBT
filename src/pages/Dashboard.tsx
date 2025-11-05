@@ -395,7 +395,18 @@ const Dashboard = () => {
 
         <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-3xl font-bold">Your Tests</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-3xl font-bold">Your Tests</h2>
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                tests.length >= 10 
+                  ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400' 
+                  : tests.length >= 8 
+                  ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                  : 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
+              }`}>
+                {tests.length}/10
+              </span>
+            </div>
             {tests.length > 0 && (
               <div className="flex gap-2">
                 {!isSelectionMode ? (
@@ -440,6 +451,29 @@ const Dashboard = () => {
               </div>
             )}
           </div>
+
+          {/* Test limit warning */}
+          {tests.length >= 8 && (
+            <Card className={`${
+              tests.length >= 10 
+                ? 'bg-red-50 border-red-200 dark:bg-red-900/10 dark:border-red-800' 
+                : 'bg-yellow-50 border-yellow-200 dark:bg-yellow-900/10 dark:border-yellow-800'
+            }`}>
+              <CardContent className="py-3">
+                <p className={`text-sm font-medium ${
+                  tests.length >= 10 
+                    ? 'text-red-800 dark:text-red-300' 
+                    : 'text-yellow-800 dark:text-yellow-300'
+                }`}>
+                  {tests.length >= 10 
+                    ? '⚠️ Test limit reached! You have 10/10 tests. Please delete some tests before adding new ones.' 
+                    : `⚠️ Approaching test limit: ${tests.length}/10 tests. Consider deleting old tests to make room for new ones.`
+                  }
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           {tests.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">

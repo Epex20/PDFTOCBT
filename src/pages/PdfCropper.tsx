@@ -767,6 +767,32 @@ export default function PdfCropper() {
     try {
       console.log('Starting test save process...')
       
+      // Check if user has reached the 10 test limit
+      console.log('Checking test count limit...')
+      const { data: existingTests, error: countError } = await supabase
+        .from('tests')
+        .select('id')
+        .eq('user_id', user.id)
+      
+      if (countError) {
+        console.error('Error checking test count:', countError)
+        throw new Error('Failed to check test count. Please try again.')
+      }
+
+      const testCount = existingTests?.length || 0
+      console.log(`User has ${testCount} tests`)
+
+      if (testCount >= 10) {
+        toast({
+          title: "Test limit reached",
+          description: "You can only save up to 10 tests. Please delete some tests from your dashboard before adding new ones.",
+          variant: "destructive",
+          duration: 6000,
+        })
+        setIsSaving(false)
+        return
+      }
+      
       // Test the database connection and user permissions
       console.log('Testing database connection and permissions...')
       const { data: permissionTest, error: permissionError } = await supabase
